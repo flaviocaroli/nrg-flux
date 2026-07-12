@@ -1,0 +1,24 @@
+# secrets — never commit
+.env
+*.env
+!.env.example
+
+# data & models
+backend/nrgflux.db
+backend/models/
+*.db
+*.sqlite
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# node
+node_modules/
+frontend/dist/
+
+# misc
+.DS_Store
+*.log

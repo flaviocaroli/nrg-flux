@@ -1,0 +1,14 @@
+# NRG-Flux backend — core dependencies
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+pydantic-settings>=2.4
+SQLAlchemy>=2.0
+httpx>=0.27
+pandas>=2.2
+numpy>=1.26
+lightgbm>=4.3
+holidays>=0.53
+python-dateutil>=2.9
+lxml>=5.2
+tenacity>=8.4

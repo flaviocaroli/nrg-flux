@@ -1,0 +1,44 @@
+# NRG-Flux — full stack
+#   docker compose up --build
+#   dashboard: http://localhost:8080   API docs: http://localhost:8080/docs
+services:
+  api:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      - DATABASE_URL=sqlite:////srv/nrgflux/data/nrgflux.db
+      - MODEL_DIR=/srv/nrgflux/models
+    volumes:
+      - nrgflux-data:/srv/nrgflux/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/v1/status')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+  # Optional: swap SQLite for Postgres/TimescaleDB in production.
+  # Uncomment, then set DATABASE_URL=postgresql+psycopg://nrgflux:nrgflux@db:5432/nrgflux
+  # and add `psycopg[binary]` to backend/requirements.txt.
+  # db:
+  #   image: timescale/timescaledb:latest-pg16
+  #   environment:
+  #     POSTGRES_USER: nrgflux
+  #     POSTGRES_PASSWORD: nrgflux
+  #     POSTGRES_DB: nrgflux
+  #   volumes:
+  #     - nrgflux-pg:/var/lib/postgresql/data
+
+volumes:
+  nrgflux-data:
+  # nrgflux-pg:
