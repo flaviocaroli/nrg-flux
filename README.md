@@ -150,3 +150,21 @@ forecast response — if the model can't beat the baseline, don't sell it.
 Market data © ENTSO-E Transparency Platform (attribution required when
 republishing). Weather: MET Norway (CC-BY 4.0), NOAA, DWD, ECMWF open data.
 Code: MIT.
+
+to start:
+```bash
+git clone
+cd backend
+pip install -r requirements.txt
+#download italian market data for the last 30 days (or more)
+python3 scripts/backfill_entsoe.py --days 30
+
+python3 scripts/train_forecast.py
+
+#start the application backend
+uvicorn app.main:app --port 8000
+
+#open another terminal and start the frontend
+cd frontend
+npm install
+npm run dev
