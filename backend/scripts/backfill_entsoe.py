@@ -18,7 +18,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.db.models import (FlowPhysical, LoadActual, LoadForecastTso,  # noqa: E402
-                           PriceDayAhead, RawDocument, SessionLocal, init_db)
+                           Outage, PriceDayAhead, RawDocument, SessionLocal,
+                           init_db)
 from app.ingestion.entsoe import EntsoeClient  # noqa: E402
 from app.utils.eic import IT_BORDERS, ITALY_ZONES  # noqa: E402
 from app.utils.timeutils import market_day  # noqa: E402
@@ -90,6 +91,27 @@ def main():
                                               source_doc_id="A11"),
                        ["from_area_eic", "to_area_eic", "ts_utc"])
             db.commit()
+
+    # outages: generation (A80) and transmission (A78) unavailabilities.
+    # Window includes the future so ongoing/announced outages are captured.
+    for doc_type, label in (("A80", "generation"), ("A78", "transmission")):
+        print(f"  outages {label} ({doc_type})")
+        try:
+            for xmls, rows in client.outages(national, start,
+                                             end + timedelta(days=30),
+                                             doc_type=doc_type):
+                for xml in xmls:
+                    db.add(RawDocument(source="entsoe",
+                                       query=f"{doc_type} {national}",
+                                       document_type=doc_type, payload=xml))
+                for r in rows:
+                    r.pop("revision", None)
+                    r.pop("created", None)
+                    upsert(db, Outage, r, ["outage_id"])
+                db.commit()
+        except Exception as exc:
+            print(f"    ! outage ingestion for {doc_type} failed: {exc}")
+            print("      (continuing — check token permissions / query window)")
 
     db.close()
     print("Backfill complete. Set DEMO_MODE=false in .env and restart the API.")

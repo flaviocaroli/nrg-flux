@@ -26,7 +26,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import get_settings
 from ..parsers.entsoe_xml import (parse_flow_document, parse_load_document,
-                                  parse_price_document)
+                                  parse_price_document,
+                                  parse_unavailability_document)
 from ..utils.timeutils import to_utc
 
 log = logging.getLogger("nrgflux.entsoe")
@@ -110,3 +111,49 @@ class EntsoeClient:
                              "out_Domain": from_eic,
                              "periodStart": self._fmt(s), "periodEnd": self._fmt(e)})
             yield xml, parse_flow_document(xml)
+
+    @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, min=2, max=60))
+    def _get_bytes(self, params: dict) -> bytes:
+        wait = self.min_interval - (time.monotonic() - self._last_call)
+        if wait > 0:
+            time.sleep(wait)
+        self._last_call = time.monotonic()
+        with httpx.Client(timeout=120) as client:
+            r = client.get(self.base, params={"securityToken": self.token, **params})
+        if r.status_code == 429:
+            raise httpx.HTTPStatusError("429", request=r.request, response=r)
+        r.raise_for_status()
+        return r.content
+
+    def outages(self, area_eic: str, start: datetime, end: datetime,
+                doc_type: str = "A80"):
+        """Unavailability documents. A80 = generation, A77 = production,
+        A78 = transmission. The API returns a ZIP of XML documents when more
+        than one matches — both plain-XML and ZIP responses are handled.
+
+        Yields (list_of_raw_xml_strings, list_of_outage_dicts) per slice.
+        ENTSO-E caps these queries at 200 documents / 1 year per request;
+        the standard slicing keeps us well inside that.
+        """
+        import io
+        import zipfile
+        for s, e in self._sliced(start, end):
+            content = self._get_bytes({"documentType": doc_type,
+                                       "biddingZone_Domain": area_eic,
+                                       "periodStart": self._fmt(s),
+                                       "periodEnd": self._fmt(e)})
+            xmls: list[str] = []
+            if content[:2] == b"PK":                      # ZIP archive
+                with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                    for name in zf.namelist():
+                        if name.lower().endswith(".xml"):
+                            xmls.append(zf.read(name).decode("utf-8", "replace"))
+            else:
+                xmls.append(content.decode("utf-8", "replace"))
+            rows: list[dict] = []
+            for xml in xmls:
+                try:
+                    rows.extend(parse_unavailability_document(xml))
+                except Exception as exc:               # keep the slice alive
+                    log.warning("outage document parse failed: %s", exc)
+            yield xmls, rows

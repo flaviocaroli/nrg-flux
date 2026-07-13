@@ -64,6 +64,24 @@ def create_webhook(body: WebhookCreate, db: Session = Depends(get_db)):
             "signing": "HMAC-SHA256 over the raw body with your webhook secret"}
 
 
+@router.get("/account/usage")
+def account_usage(ctx=Depends(require_api_key), db: Session = Depends(get_db)):
+    """Let a client inspect their own plan, limits, and today's usage."""
+    from ..services.auth_service import PLANS, usage_breakdown, usage_today
+    if ctx.client_id is None:
+        return {"plan": ctx.plan, "limits": PLANS["internal"],
+                "note": "internal/dev key — unmetered"}
+    used = usage_today(db, ctx.client_id)
+    limits = PLANS.get(ctx.plan, PLANS["free"])
+    return {"client": ctx.name, "plan": ctx.plan,
+            "limits": {"per_minute": limits["per_minute"],
+                       "per_day": limits["per_day"]},
+            "used_today": used,
+            "remaining_today": (limits["per_day"] - used) if limits["per_day"] else None,
+            "resets_at_utc": "00:00",
+            "by_endpoint": usage_breakdown(db, ctx.client_id)}
+
+
 # ------------------------------------------------------------- dashboard feed
 
 @router.get("/dashboard/italy")
@@ -89,14 +107,24 @@ def dashboard_italy(db: Session = Depends(get_db)):
                            .order_by(LoadActual.ts_utc)).scalars().all()
     load_series = [[iso(r.ts_utc), r.load_mw] for r in load_rows]
 
-    flows = db.execute(select(FlowPhysical)
-                       .where(FlowPhysical.ts_utc == now - timedelta(hours=1))).scalars().all()
+    # Latest observation per border within the last 48h. Live ENTSO-E flows
+    # publish with delay, so an exact `now - 1h` match would often be empty.
+    flow_rows = db.execute(select(FlowPhysical)
+                           .where(FlowPhysical.ts_utc >= now - timedelta(hours=48),
+                                  FlowPhysical.ts_utc <= now + timedelta(hours=1))
+                           .order_by(FlowPhysical.ts_utc)).scalars().all()
+    latest_per_border: dict[tuple, FlowPhysical] = {}
+    for r in flow_rows:
+        latest_per_border[(r.from_area_eic, r.to_area_eic)] = r  # last wins (sorted)
     border_labels = {(f, t): lbl for f, t, lbl in IT_BORDERS}
-    flow_now = [{"border": border_labels.get((r.from_area_eic, r.to_area_eic),
-                                             f"{r.from_area_eic}→{r.to_area_eic}"),
-                 "mw": round(r.mw, 0)} for r in flows]
+    flow_now = [{"border": border_labels.get(k, f"{k[0]}→{k[1]}"),
+                 "mw": round(r.mw, 0), "ts_utc": iso(r.ts_utc)}
+                for k, r in latest_per_border.items()]
 
-    outage_rows = db.execute(select(Outage).order_by(Outage.unavailable_mw.desc())
+    # only outages that are ongoing or ended within the last 3 days
+    outage_rows = db.execute(select(Outage)
+                             .where(Outage.end_utc >= now - timedelta(days=3))
+                             .order_by(Outage.unavailable_mw.desc())
                              .limit(10)).scalars().all()
     outages = [{"asset": r.asset_name, "zone": short.get(r.area_eic, r.area_eic),
                 "kind": r.kind, "planned": r.planned, "mw": r.unavailable_mw,

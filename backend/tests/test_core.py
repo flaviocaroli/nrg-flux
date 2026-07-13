@@ -132,3 +132,116 @@ def test_invalid_window_rejected(client):
 def test_forecast_invalid_horizon(client):
     r = client.get("/v1/forecast/load", params={"horizon": 99})
     assert r.status_code == 422
+
+
+# ------------------------------------------------------- outage parser
+
+OUTAGE_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<Unavailability_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-6:outagedocument:3:0">
+  <mRID>OUTDOC-123</mRID>
+  <revisionNumber>2</revisionNumber>
+  <type>A80</type>
+  <createdDateTime>2026-07-10T09:00:00Z</createdDateTime>
+  <unavailability_Time_Period.timeInterval>
+    <start>2026-07-11T06:00Z</start><end>2026-07-15T18:00Z</end>
+  </unavailability_Time_Period.timeInterval>
+  <TimeSeries>
+    <businessType>A54</businessType>
+    <biddingZone_Domain.mRID>10Y1001A1001A71M</biddingZone_Domain.mRID>
+    <production_RegisteredResource.mRID>26T0123456789012</production_RegisteredResource.mRID>
+    <production_RegisteredResource.name>Montalto CCGT</production_RegisteredResource.name>
+    <production_RegisteredResource.pSRType.psrType>B04</production_RegisteredResource.pSRType.psrType>
+    <production_RegisteredResource.pSRType.powerSystemResources.name>Montalto U2</production_RegisteredResource.pSRType.powerSystemResources.name>
+    <production_RegisteredResource.pSRType.powerSystemResources.nominalP>780</production_RegisteredResource.pSRType.powerSystemResources.nominalP>
+    <Available_Period>
+      <timeInterval><start>2026-07-11T06:00Z</start><end>2026-07-15T18:00Z</end></timeInterval>
+      <resolution>PT60M</resolution>
+      <Point><position>1</position><quantity>150</quantity></Point>
+    </Available_Period>
+  </TimeSeries>
+</Unavailability_MarketDocument>"""
+
+
+def test_outage_parser_extracts_event():
+    from app.parsers.entsoe_xml import parse_unavailability_document
+    rows = parse_unavailability_document(OUTAGE_XML)
+    assert len(rows) == 1
+    o = rows[0]
+    assert o["kind"] == "generation"
+    assert o["planned"] is False                    # A54 = forced
+    assert o["asset_name"] == "Montalto U2"
+    assert o["fuel"] == "fossil gas"                # B04
+    assert o["unavailable_mw"] == 630.0             # 780 nominal - 150 available
+    assert o["start_utc"] == datetime(2026, 7, 11, 6, 0, tzinfo=timezone.utc)
+    assert o["area_eic"] == "10Y1001A1001A71M"
+
+
+def test_outage_parser_handles_acknowledgement():
+    from app.parsers.entsoe_xml import parse_unavailability_document
+    ack = ('<?xml version="1.0"?><Acknowledgement_MarketDocument xmlns="urn:x">'
+           '<Reason/></Acknowledgement_MarketDocument>')
+    assert parse_unavailability_document(ack) == []
+
+
+# ------------------------------------------------------- auth & rate limits
+
+@pytest.fixture()
+def customer_key():
+    from app.db.models import SessionLocal, init_db
+    from app.services import auth_service
+    init_db()
+    # tiny test plan so limits are hit quickly
+    auth_service.PLANS["testplan"] = {"per_minute": 3, "per_day": 5}
+    db = SessionLocal()
+    client, key = auth_service.create_client(db, name="pytest-co", plan="free")
+    row = db.get(auth_service.ApiClient, client.id)
+    row.plan = "testplan"
+    db.commit()
+    db.close()
+    yield key
+    db = SessionLocal()
+    auth_service.revoke_client(db, key.split("_")[1])
+    db.close()
+
+
+def test_customer_key_authenticates(client, customer_key):
+    r = client.get("/v1/eic/resolve", params={"q": "sicily"},
+                   headers={"X-Api-Key": customer_key})
+    assert r.status_code == 200
+
+
+def test_invalid_customer_key_rejected(client):
+    r = client.get("/v1/eic/resolve", params={"q": "sicily"},
+                   headers={"X-Api-Key": "nrgf_deadbeef_" + "0" * 40})
+    assert r.status_code == 401
+
+
+def test_per_minute_rate_limit_429(client, customer_key):
+    from app.services import auth_service
+    auth_service._minute_buckets.clear()
+    codes = [client.get("/v1/eic/resolve", params={"q": "italy"},
+                        headers={"X-Api-Key": customer_key}).status_code
+             for _ in range(4)]
+    assert codes[:3] == [200, 200, 200]
+    assert codes[3] == 429
+
+
+def test_revoked_key_403(client, customer_key):
+    from app.db.models import SessionLocal
+    from app.services.auth_service import revoke_client
+    db = SessionLocal()
+    revoke_client(db, customer_key.split("_")[1])
+    db.close()
+    r = client.get("/v1/eic/resolve", params={"q": "italy"},
+                   headers={"X-Api-Key": customer_key})
+    assert r.status_code == 403
+
+
+def test_account_usage_endpoint(client, customer_key):
+    from app.services import auth_service
+    auth_service._minute_buckets.clear()
+    r = client.get("/v1/account/usage", headers={"X-Api-Key": customer_key})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["plan"] == "testplan"
+    assert body["used_today"] >= 1

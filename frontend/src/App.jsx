@@ -219,8 +219,15 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Cross-border imports · latest hour <span className="tag">A11 physical flows</span></h2>
-          <Chart option={flowOption} className="chart short" />
+          <h2>Cross-border imports · latest available hour <span className="tag">A11 physical flows</span></h2>
+          {dash.flows_now.length === 0 ? (
+            <div style={{ padding: '48px 12px', fontFamily: 'IBM Plex Mono', fontSize: 12.5, color: C.slate, textAlign: 'center' }}>
+              No flow data in the last 48h.<br />
+              Run <span style={{ color: C.amber }}>python scripts/backfill_entsoe.py</span> to ingest border flows.
+            </div>
+          ) : (
+            <Chart option={flowOption} className="chart short" />
+          )}
         </div>
         <div className="panel" style={{ overflowX: 'auto' }}>
           <h2>Largest unavailabilities <span className="tag">generation + grid</span></h2>
@@ -229,6 +236,11 @@ export default function App() {
               <tr><th>Asset</th><th>Zone</th><th>Type</th><th style={{ textAlign: 'right' }}>MW</th></tr>
             </thead>
             <tbody>
+              {dash.outages.length === 0 && (
+                <tr><td colSpan="4" style={{ color: 'var(--slate)', padding: '28px 10px', textAlign: 'center' }}>
+                  No current outages ingested — run the backfill to pull A80/A78 unavailability documents.
+                </td></tr>
+              )}
               {dash.outages.slice(0, 7).map((o) => (
                 <tr key={o.asset + o.start}>
                   <td className="asset">{o.asset}</td>

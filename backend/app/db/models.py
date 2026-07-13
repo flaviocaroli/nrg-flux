@@ -159,6 +159,34 @@ class RawDocument(Base):
     parser_version: Mapped[str] = mapped_column(String(16), default="1.0.0")
 
 
+class ApiClient(Base):
+    """A customer of the NRG-Flux API. Keys are stored HASHED (sha256) —
+    the plaintext key is shown exactly once at creation time."""
+    __tablename__ = "api_clients"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    email: Mapped[str] = mapped_column(String(256), default="")
+    key_prefix: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64))       # sha256 hex of full key
+    plan: Mapped[str] = mapped_column(String(24), default="free")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class ApiUsage(Base):
+    """Daily usage counters per client per endpoint (metering + quotas)."""
+    __tablename__ = "api_usage_daily"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD (UTC)
+    endpoint: Mapped[str] = mapped_column(String(96))
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    __table_args__ = (Index("ix_usage_client_day_ep", "client_id", "day", "endpoint",
+                            unique=True),)
+
+
 # ---------------------------------------------------------------- engine
 
 _settings = get_settings()

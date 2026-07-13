@@ -1,25 +1,49 @@
 """Shared API dependencies: key auth, lineage envelope, errors."""
 from datetime import datetime, timezone
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request, Response
 
 from ..config import get_settings
+from ..db.models import SessionLocal
+from ..services.auth_service import ClientContext, authenticate
 from ..utils.timeutils import iso, market_day, parse_iso
 
 SCHEMA_VERSION = "1.0.0"
 PARSER_VERSION = "1.0.0"
 
 
-def require_api_key(x_api_key: str = Header(default="")) -> str:
+def require_api_key(request: Request, response: Response,
+                    x_api_key: str = Header(default="")):
+    """Auth for all data endpoints.
+
+    Accepts, in order:
+      1. no key in development mode (local convenience)
+      2. an internal key from the API_KEYS env list (unlimited, for you/dashboard)
+      3. a customer key (nrgf_..., issued via scripts/manage_clients.py) —
+         validated against the api_clients table with per-plan rate limits
+         and daily quotas; usage is metered per endpoint.
+    """
     s = get_settings()
-    if s.environment == "development" and not x_api_key:
-        return "dev"
-    if x_api_key not in s.api_key_list():
+    if not x_api_key:
+        if s.environment == "development":
+            return ClientContext(client_id=None, name="dev", plan="internal",
+                                 per_minute=None, per_day=None)
         raise HTTPException(status_code=401, detail={
-            "error": "invalid_api_key",
-            "hint": "Pass your key in the X-Api-Key header. "
-                    "Get a sandbox key from the NRG-Flux portal."})
-    return x_api_key
+            "error": "missing_api_key",
+            "hint": "Pass your key in the X-Api-Key header."})
+    if x_api_key in s.api_key_list():
+        return ClientContext(client_id=None, name="internal", plan="internal",
+                             per_minute=None, per_day=None)
+
+    db = SessionLocal()
+    try:
+        ctx = authenticate(db, x_api_key, endpoint=request.url.path)
+    finally:
+        db.close()
+    if ctx.per_day is not None:
+        response.headers["X-RateLimit-Limit"] = str(ctx.per_day)
+        response.headers["X-RateLimit-Remaining"] = str(max(ctx.remaining_today or 0, 0))
+    return ctx
 
 
 def parse_window(start: str | None, end: str | None, default_hours: int = 48):
