@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..db.models import (DataQualityEvent, EicCode, FlowPhysical, LoadActual,
                          Outage, PriceDayAhead, Webhook, get_db)
-from ..utils.eic import IT_BORDERS, ITALY_ZONES
+from ..utils.eic import IT_BORDERS, ITALY_ZONES, ZONE_SHORT
 from ..utils.timeutils import iso
 from .deps import require_api_key
 
@@ -91,7 +91,8 @@ def dashboard_italy(db: Session = Depends(get_db)):
     h_start, h_end = now - timedelta(hours=72), now + timedelta(hours=36)
 
     names = {r.eic_code: r.display_name for r in db.execute(select(EicCode)).scalars()}
-    short = {z: names.get(z, z).split("(")[-1].rstrip(")") for z in ITALY_ZONES}
+    short = {z: (names[z].split("(")[-1].rstrip(")") if z in names
+                 else ZONE_SHORT.get(z, z)) for z in ITALY_ZONES}
 
     prices = db.execute(select(PriceDayAhead)
                         .where(PriceDayAhead.area_eic.in_(ITALY_ZONES),
@@ -126,7 +127,7 @@ def dashboard_italy(db: Session = Depends(get_db)):
                              .where(Outage.end_utc >= now - timedelta(days=3))
                              .order_by(Outage.unavailable_mw.desc())
                              .limit(10)).scalars().all()
-    outages = [{"asset": r.asset_name, "zone": short.get(r.area_eic, r.area_eic),
+    outages = [{"asset": r.asset_name, "zone": short.get(r.area_eic) or ZONE_SHORT.get(r.area_eic, r.area_eic),
                 "kind": r.kind, "planned": r.planned, "mw": r.unavailable_mw,
                 "fuel": r.fuel, "start": iso(r.start_utc), "end": iso(r.end_utc),
                 "reason": r.reason} for r in outage_rows]

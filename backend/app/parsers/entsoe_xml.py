@@ -80,70 +80,92 @@ PSR_FUEL = {
 def parse_unavailability_document(xml: str) -> list[dict]:
     """Parse an Unavailability_MarketDocument (doc types A77/A78/A80).
 
-    Returns dicts shaped for the outages table. Notes on semantics:
+    Semantics handled here:
       * businessType A53 = planned maintenance, A54 = forced unavailability
-      * Available_Period Point quantity = capacity still AVAILABLE during the
-        event; unavailable_mw = nominal power − min(available). When nominalP
-        is missing (some transmission docs), we fall back to the max quantity
-        as a best-effort magnitude.
+      * GENERATION (A77/A80): Point quantity = capacity still AVAILABLE;
+        unavailable_mw = nominalP - min(available).
+      * TRANSMISSION (A78): documents carry no nominalP - the quantity is the
+        remaining transfer capacity. We do NOT fake an outage size from it;
+        unavailable_mw stays 0 and the reduction is described in `reason`
+        (so interconnector notices don't pollute MW rankings with capacities).
+      * Asset naming differs by type: production_RegisteredResource.* for
+        generation, Asset_RegisteredResource.* for transmission.
+      * outage_id is derived from asset + window, so the same physical outage
+        reported across multiple documents/revisions collapses on upsert.
     """
     root = _strip_ns(etree.fromstring(xml.encode()))
     if root.tag == "Acknowledgement_MarketDocument":
         return []
-    doc_id = root.findtext("mRID") or ""
-    revision = root.findtext("revisionNumber") or "0"
-    doc_type = root.findtext("type") or ""
+
+    def t(el, tag: str) -> str:
+        return (el.findtext(tag) or "").strip()
+
+    doc_type = t(root, "type")
     kind = "transmission" if doc_type == "A78" else "generation"
-    created = root.findtext("createdDateTime") or ""
 
     # document-level outage window (fallback: first period interval)
-    w_start = root.findtext("unavailability_Time_Period.timeInterval/start")
-    w_end = root.findtext("unavailability_Time_Period.timeInterval/end")
+    w_start = t(root, "unavailability_Time_Period.timeInterval/start")
+    w_end = t(root, "unavailability_Time_Period.timeInterval/end")
 
     out = []
-    for i, ts in enumerate(root.iter("TimeSeries")):
-        business = ts.findtext("businessType") or ""
-        area = (ts.findtext("biddingZone_Domain.mRID")
-                or ts.findtext("in_Domain.mRID") or "")
-        asset_name = (ts.findtext("production_RegisteredResource.pSRType."
-                                  "powerSystemResources.name")
-                      or ts.findtext("production_RegisteredResource.name")
-                      or ts.findtext("registeredResource.name") or "unknown asset")
-        asset_eic = (ts.findtext("production_RegisteredResource.mRID")
-                     or ts.findtext("registeredResource.mRID") or "")
-        psr = ts.findtext("production_RegisteredResource.pSRType.psrType") or ""
-        nominal = ts.findtext("production_RegisteredResource.pSRType."
-                              "powerSystemResources.nominalP")
+    for ts in root.iter("TimeSeries"):
+        business = t(ts, "businessType")
+        in_dom = t(ts, "in_Domain.mRID")
+        out_dom = t(ts, "out_Domain.mRID")
+        area = t(ts, "biddingZone_Domain.mRID") or in_dom
 
-        avail_vals, p_start, p_end = [], None, None
+        asset_name = (t(ts, "production_RegisteredResource.pSRType."
+                            "powerSystemResources.name")
+                      or t(ts, "production_RegisteredResource.name")
+                      or t(ts, "Asset_RegisteredResource.name")
+                      or t(ts, "registeredResource.name")
+                      or t(ts, "production_RegisteredResource.location.name"))
+        asset_eic = (t(ts, "production_RegisteredResource.mRID")
+                     or t(ts, "Asset_RegisteredResource.mRID")
+                     or t(ts, "registeredResource.mRID"))
+        if not asset_name:
+            asset_name = (f"Interconnector {out_dom} -> {in_dom}"
+                          if kind == "transmission" and in_dom
+                          else asset_eic or "unnamed asset")
+        psr = (t(ts, "production_RegisteredResource.pSRType.psrType")
+               or t(ts, "Asset_RegisteredResource.pSRType.psrType"))
+        nominal_txt = t(ts, "production_RegisteredResource.pSRType."
+                            "powerSystemResources.nominalP")
+        nominal = float(nominal_txt) if nominal_txt else None
+
+        avail_vals, p_start, p_end = [], "", ""
         for period in ts.iter("Available_Period"):
-            s = period.findtext("timeInterval/start")
-            e = period.findtext("timeInterval/end")
-            p_start = p_start or s
-            p_end = e or p_end
+            p_start = p_start or t(period, "timeInterval/start")
+            p_end = t(period, "timeInterval/end") or p_end
             for point in period.iter("Point"):
                 q = point.findtext("quantity")
                 if q is not None:
-                    avail_vals.append(float(q))
+                    avail_vals.append(float(q.strip()))
 
         start_txt = w_start or p_start
         end_txt = w_end or p_end
         if not start_txt or not end_txt:
             continue
-        if nominal is not None and avail_vals:
-            unavailable = max(0.0, float(nominal) - min(avail_vals))
-        elif avail_vals:
-            unavailable = max(avail_vals)   # best effort when nominalP absent
-        elif nominal is not None:
-            unavailable = float(nominal)    # fully out
-        else:
-            unavailable = 0.0
 
-        reason = (root.findtext("Reason/text") or ts.findtext("Reason/text")
+        reason = (t(root, "Reason/text") or t(ts, "Reason/text")
                   or ("Planned maintenance" if business == "A53" else
                       "Forced outage" if business == "A54" else ""))
+
+        if kind == "generation" and nominal is not None and avail_vals:
+            unavailable = max(0.0, nominal - min(avail_vals))
+        elif kind == "generation" and nominal is not None:
+            unavailable = nominal            # no periods listed -> fully out
+        elif kind == "generation" and avail_vals:
+            unavailable = max(avail_vals)    # best effort, nominal absent
+        else:
+            # transmission (or nothing usable): don't invent an outage size
+            unavailable = 0.0
+            if avail_vals:
+                reason = (f"Transfer capacity reduced to "
+                          f"{min(avail_vals):.0f} MW. {reason}").strip()
+
         out.append({
-            "outage_id": f"{doc_id}-{i}" if doc_id else f"{asset_eic}-{start_txt}",
+            "outage_id": f"{doc_type}-{asset_eic or asset_name[:40]}-{start_txt}",
             "kind": kind,
             "planned": business == "A53",
             "area_eic": area,
@@ -154,7 +176,5 @@ def parse_unavailability_document(xml: str) -> list[dict]:
             "end_utc": _parse_dt(end_txt),
             "unavailable_mw": round(unavailable, 1),
             "reason": reason,
-            "revision": int(revision),
-            "created": created,
         })
     return out

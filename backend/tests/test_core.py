@@ -245,3 +245,47 @@ def test_account_usage_endpoint(client, customer_key):
     body = r.json()
     assert body["plan"] == "testplan"
     assert body["used_today"] >= 1
+
+
+TRANSMISSION_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<Unavailability_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-6:outagedocument:3:0">
+  <mRID>TDOC-9</mRID><type>A78</type>
+  <unavailability_Time_Period.timeInterval>
+    <start>2026-07-12T06:00Z</start><end>2026-07-14T18:00Z</end>
+  </unavailability_Time_Period.timeInterval>
+  <TimeSeries>
+    <businessType>A53</businessType>
+    <in_Domain.mRID> 10Y1001A1001A73I </in_Domain.mRID>
+    <out_Domain.mRID>10YFR-RTE------C</out_Domain.mRID>
+    <Asset_RegisteredResource.mRID>10T-FR-IT-000012</Asset_RegisteredResource.mRID>
+    <Asset_RegisteredResource.name>
+      Albertville-Rondissone 400kV
+    </Asset_RegisteredResource.name>
+    <Available_Period>
+      <timeInterval><start>2026-07-12T06:00Z</start><end>2026-07-14T18:00Z</end></timeInterval>
+      <Point><position>1</position><quantity>1450</quantity></Point>
+    </Available_Period>
+  </TimeSeries>
+</Unavailability_MarketDocument>"""
+
+
+def test_transmission_outage_semantics():
+    """A78: no fake MW from available capacity; names + whitespace handled."""
+    from app.parsers.entsoe_xml import parse_unavailability_document
+    rows = parse_unavailability_document(TRANSMISSION_XML)
+    assert len(rows) == 1
+    o = rows[0]
+    assert o["kind"] == "transmission"
+    assert o["asset_name"] == "Albertville-Rondissone 400kV"   # stripped
+    assert o["area_eic"] == "10Y1001A1001A73I"                 # stripped
+    assert o["unavailable_mw"] == 0.0                          # not 1450!
+    assert "reduced to 1450 MW" in o["reason"]
+    assert o["planned"] is True
+
+
+def test_outage_id_stable_across_documents():
+    """Same asset+window in two different documents -> same outage_id."""
+    from app.parsers.entsoe_xml import parse_unavailability_document
+    a = parse_unavailability_document(OUTAGE_XML)[0]
+    b = parse_unavailability_document(OUTAGE_XML.replace("OUTDOC-123", "OUTDOC-999"))[0]
+    assert a["outage_id"] == b["outage_id"]

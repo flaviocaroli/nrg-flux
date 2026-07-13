@@ -53,6 +53,17 @@ IT_BORDERS: list[tuple[str, str, str]] = [
 ITALY_ZONES = ["10Y1001A1001A73I", "10Y1001A1001A70O", "10Y1001A1001A71M",
                "10Y1001A1001A788", "10Y1001A1001A74G", "10Y1001A1001A75E"]
 
+# Short zone labels, independent of the DB (used by the dashboard as fallback)
+ZONE_SHORT: dict[str, str] = {
+    "10Y1001A1001A73I": "NORD", "10Y1001A1001A70O": "CNOR",
+    "10Y1001A1001A71M": "CSUD", "10Y1001A1001A788": "SUD",
+    "10Y1001A1001A74G": "SARD", "10Y1001A1001A75E": "SICI",
+    "10YIT-GRTN-----B": "IT", "10YGB----------A": "GB",
+    "10YFR-RTE------C": "FR", "10YCH-SWISSGRIDZ": "CH",
+    "10YAT-APG------L": "AT", "10YSI-ELES-----O": "SI",
+    "10YGR-HTSO-----Y": "GR", "10Y1001A1001A885": "ME",
+}
+
 # Approximate zone centroids for population-weighted weather features
 ZONE_CENTROIDS: dict[str, tuple[float, float]] = {
     "10YIT-GRTN-----B": (42.5, 12.5),

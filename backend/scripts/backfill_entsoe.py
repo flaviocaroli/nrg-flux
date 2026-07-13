@@ -35,6 +35,9 @@ def upsert(db, model, values: dict, keys: list[str]):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=30)
+    ap.add_argument("--reset-outages", action="store_true",
+                    help="clear the outages table before ingesting (use once "
+                         "after parser upgrades to drop stale/duplicate rows)")
     args = ap.parse_args()
 
     s = get_settings()
@@ -44,6 +47,25 @@ def main():
 
     init_db()
     db = SessionLocal()
+
+    # ensure EIC display names exist (demo seeder normally does this; a
+    # live-only database would otherwise show raw EIC codes in the dashboard)
+    from sqlalchemy import func, select as sa_select
+    from app.db.models import EicCode
+    from app.utils.eic import EIC_SEED
+    if db.execute(sa_select(func.count()).select_from(EicCode)).scalar_one() == 0:
+        print("Seeding EIC display names ...")
+        for e in EIC_SEED:
+            db.add(EicCode(eic_code=e.eic, code_type=e.code_type,
+                           display_name=e.name, aliases=e.aliases, country=e.country))
+        db.commit()
+
+    if args.reset_outages:
+        from sqlalchemy import delete
+        print("Clearing outages table ...")
+        db.execute(delete(Outage))
+        db.commit()
+
     client = EntsoeClient()
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=args.days)
@@ -92,26 +114,45 @@ def main():
                        ["from_area_eic", "to_area_eic", "ts_utc"])
             db.commit()
 
-    # outages: generation (A80) and transmission (A78) unavailabilities.
-    # Window includes the future so ongoing/announced outages are captured.
-    for doc_type, label in (("A80", "generation"), ("A78", "transmission")):
-        print(f"  outages {label} ({doc_type})")
+    # --- outages ---
+    # A80 generation unavailability: queried per bidding zone (national zone
+    # exceeds the API's 200-document cap far less often when split; the client
+    # also auto-bisects windows when the cap is hit).
+    print("  outages generation (A80)")
+    try:
+        for xmls, rows in client.outages(national, start,
+                                         end + timedelta(days=30),
+                                         doc_type="A80"):
+            for xml in xmls:
+                db.add(RawDocument(source="entsoe", query=f"A80 {national}",
+                                   document_type="A80", payload=xml))
+            for r in rows:
+                r.pop("revision", None)
+                r.pop("created", None)
+                upsert(db, Outage, r, ["outage_id"])
+            db.commit()
+    except Exception as exc:
+        print(f"    ! generation outage ingestion failed: {exc}")
+
+    # A78 transmission unavailability: ENTSO-E requires a border
+    # (in_Domain/out_Domain), not a bidding zone.
+    print("  outages transmission (A78, per border)")
+    for f, t, label in IT_BORDERS:
         try:
             for xmls, rows in client.outages(national, start,
                                              end + timedelta(days=30),
-                                             doc_type=doc_type):
+                                             doc_type="A78",
+                                             in_domain=t, out_domain=f):
                 for xml in xmls:
-                    db.add(RawDocument(source="entsoe",
-                                       query=f"{doc_type} {national}",
-                                       document_type=doc_type, payload=xml))
+                    db.add(RawDocument(source="entsoe", query=f"A78 {label}",
+                                       document_type="A78", payload=xml))
                 for r in rows:
                     r.pop("revision", None)
                     r.pop("created", None)
                     upsert(db, Outage, r, ["outage_id"])
                 db.commit()
         except Exception as exc:
-            print(f"    ! outage ingestion for {doc_type} failed: {exc}")
-            print("      (continuing — check token permissions / query window)")
+            print(f"    ! {label}: {exc}")
 
     db.close()
     print("Backfill complete. Set DEMO_MODE=false in .env and restart the API.")
