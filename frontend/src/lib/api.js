@@ -9,6 +9,7 @@ async function get(path) {
 export const api = {
   dashboard: () => get('/v1/dashboard/italy'),
   forecast: (h = 168) => get(`/v1/forecast/load?horizon=${h}`),
+  priceForecast: (h = 48) => get(`/v1/forecast/price?horizon=${h}`),
   explain: () => get('/v1/forecast/explain'),
   tsoForecast: () => get('/v1/load/forecast/tso?area=10YIT-GRTN-----B'),
   status: () => get('/v1/status'),

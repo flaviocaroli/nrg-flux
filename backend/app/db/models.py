@@ -159,6 +159,20 @@ class RawDocument(Base):
     parser_version: Mapped[str] = mapped_column(String(16), default="1.0.0")
 
 
+class ForecastPrice(Base):
+    """Day-ahead price forecast (p10/p50/p90) per area and issue time."""
+    __tablename__ = "forecast_price"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    area_eic: Mapped[str] = mapped_column(String(24), index=True)
+    issued_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    target_ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    horizon_h: Mapped[int] = mapped_column(Integer)
+    p10_eur: Mapped[float] = mapped_column(Float)
+    p50_eur: Mapped[float] = mapped_column(Float)
+    p90_eur: Mapped[float] = mapped_column(Float)
+    model_version: Mapped[str] = mapped_column(String(16), default="0.1.0")
+
+
 class ApiClient(Base):
     """A customer of the NRG-Flux API. Keys are stored HASHED (sha256) —
     the plaintext key is shown exactly once at creation time."""

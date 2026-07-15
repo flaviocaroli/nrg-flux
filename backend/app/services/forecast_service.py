@@ -100,3 +100,71 @@ def run_whatif(area: str, temp_delta_c: float, horizon: int) -> dict:
                      for ts in base.index],
         "summary_delta_mw_mean": round(float((shifted["p50"] - base["p50"]).mean()), 1),
     }
+
+
+# ------------------------------------------------------------ price forecast
+
+def _price_history_from_db(db: Session, area: str, days: int = 60) -> pd.Series:
+    from ..db.models import PriceDayAhead
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = db.execute(select(PriceDayAhead)
+                      .where(PriceDayAhead.area_eic == area,
+                             PriceDayAhead.ts_utc >= since)
+                      .order_by(PriceDayAhead.ts_utc)).scalars().all()
+    idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
+                            if r.ts_utc.tzinfo is None else r.ts_utc
+                            for r in rows], tz="UTC")
+    return pd.Series([r.price_eur_mwh for r in rows], index=idx).sort_index()
+
+
+def _load_forecast_series(db: Session, area_national: str) -> pd.Series:
+    """Our own issued load forecast (p50) — the key price driver."""
+    from ..db.models import ForecastLoad
+    latest = db.execute(select(ForecastLoad.issued_at_utc)
+                        .where(ForecastLoad.area_eic == area_national)
+                        .order_by(ForecastLoad.issued_at_utc.desc())
+                        .limit(1)).scalar_one_or_none()
+    if latest is None:
+        return pd.Series(dtype=float)
+    rows = db.execute(select(ForecastLoad)
+                      .where(ForecastLoad.area_eic == area_national,
+                             ForecastLoad.issued_at_utc == latest)
+                      .order_by(ForecastLoad.target_ts_utc)).scalars().all()
+    idx = pd.DatetimeIndex([r.target_ts_utc.replace(tzinfo=timezone.utc)
+                            if r.target_ts_utc.tzinfo is None else r.target_ts_utc
+                            for r in rows], tz="UTC")
+    return pd.Series([r.p50_mw for r in rows], index=idx)
+
+
+def issue_price_forecast(area: str, horizon_hours: int = 48) -> dict:
+    """Train-free: load the price model and persist a fresh price forecast."""
+    from ..db.models import ForecastPrice
+    from ..forecasting.price_model import PRICE_MODEL_VERSION, PriceForecaster
+    s = get_settings()
+    pf = PriceForecaster(s.model_dir, area)
+    if not pf.load_models():
+        raise RuntimeError("No price model — run scripts/train_price_forecast.py first")
+
+    db = SessionLocal()
+    try:
+        price_hist = _price_history_from_db(db, area)
+        if len(price_hist) < 200:
+            raise RuntimeError("Not enough price history in DB for this area")
+        load_fc = _load_forecast_series(db, s.forecast_default_area)
+        if load_fc.empty:
+            raise RuntimeError("No load forecast issued yet — run train_forecast.py first")
+        pred = pf.predict(price_hist, load_fc, horizon_hours)
+
+        issued = datetime.now(timezone.utc)
+        db.execute(delete(ForecastPrice).where(ForecastPrice.area_eic == area))
+        db.commit()
+        for h, (ts, row) in enumerate(pred.iterrows(), start=1):
+            db.add(ForecastPrice(area_eic=area, issued_at_utc=issued,
+                                 target_ts_utc=ts.to_pydatetime(), horizon_h=h,
+                                 p10_eur=float(row["p10"]), p50_eur=float(row["p50"]),
+                                 p90_eur=float(row["p90"]),
+                                 model_version=PRICE_MODEL_VERSION))
+        db.commit()
+        return {"area": area, "issued_at_utc": iso(issued), "points": int(len(pred))}
+    finally:
+        db.close()

@@ -166,3 +166,63 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
   .kpis { grid-template-columns: 1fr; }
   .masthead h1 { font-size: 21px; }
 }
+
+/* ---------------- data catalog ---------------- */
+.catalog { margin-top: 10px; font-family: var(--font-mono); font-size: 12px; }
+.catalog-head, .catalog-row {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr 1.1fr 1fr 0.6fr 1.15fr;
+  gap: 10px; align-items: center;
+}
+.catalog-head {
+  color: var(--slate-dim); font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+.catalog-row { padding: 9px 6px; border-bottom: 1px solid rgba(38,51,79,.5); }
+.catalog-row:hover { background: rgba(24,37,67,.5); }
+.ds-name { color: var(--chalk); display: flex; align-items: center; gap: 8px; }
+.ds-name i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.ds-src, .ds-cad { color: var(--slate-dim); font-size: 11px; }
+.ds-unit { color: var(--slate); font-size: 11px; }
+.ds-count { color: var(--teal); text-align: right; font-variant-numeric: tabular-nums; }
+.ds-count em { font-size: 10px; font-style: normal; }
+.ds-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.ds-actions button {
+  background: transparent; border: 1px solid var(--hairline); color: var(--slate);
+  border-radius: 5px; padding: 4px 9px; font-family: var(--font-mono);
+  font-size: 10.5px; cursor: pointer; transition: all .15s;
+}
+.ds-actions button:hover:not(:disabled) { border-color: var(--teal); color: var(--teal); }
+.ds-actions button.dl { border-color: rgba(52,217,195,.4); color: var(--teal); }
+.ds-actions button.dl:hover:not(:disabled) { background: rgba(52,217,195,.12); }
+.ds-actions button:disabled { opacity: .45; cursor: default; }
+.catalog-foot {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline);
+  color: var(--slate-dim); font-size: 10.5px; line-height: 1.6;
+  font-family: var(--font-display);
+}
+@media (max-width: 900px) {
+  .catalog-head { display: none; }
+  .catalog-row { grid-template-columns: 1fr 1fr; row-gap: 4px; }
+}
+
+/* ---------------- price forecast panel ---------------- */
+.skill-badge {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 5px;
+  padding: 3px 9px; font-family: var(--font-mono); font-size: 10px;
+  border: 1px solid var(--hairline); letter-spacing: .04em;
+}
+.skill-badge.good { color: var(--ok); border-color: rgba(88,209,138,.4); }
+.skill-badge.bad { color: var(--amber); border-color: rgba(255,180,84,.4); }
+.section-rule {
+  display: flex; align-items: center; gap: 14px; margin: 26px 0 12px;
+}
+.section-rule span {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--slate-dim); white-space: nowrap;
+}
+.section-rule:before, .section-rule:after {
+  content: ""; height: 1px; background: var(--hairline); flex: 1;
+}
+.section-rule:before { flex: 0 0 4px; }

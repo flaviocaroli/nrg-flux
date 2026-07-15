@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..db.models import ForecastExplanation, ForecastLoad, get_db
+from ..db.models import (ForecastExplanation, ForecastLoad, SessionLocal,
+                         get_db)
 from ..utils.timeutils import iso, parse_iso
 from .deps import require_api_key
 
@@ -119,4 +120,93 @@ def model_card(area: str | None = None):
     card = _model_card(area or s.forecast_default_area)
     if not card:
         raise HTTPException(404, detail={"error": "no_model_card"})
+    return card
+
+
+# ------------------------------------------------------------ price forecast
+
+def _price_card(area: str) -> dict:
+    s = get_settings()
+    path = os.path.join(s.model_dir, f"model_card_price_{area}.json")
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {}
+
+
+@router.get("/price")
+def forecast_price(area: str = "10Y1001A1001A73I", horizon: int = 48,
+                   db: Session = Depends(get_db)):
+    """Day-ahead PRICE forecast: p10/p50/p90 per hour, with published skill.
+
+    Sold as a distribution, not a point estimate. The response always carries
+    its own backtest and a `beats_naive_baseline` flag — if the model is not
+    beating the naive baseline for this zone, you will see it here.
+    """
+    from ..db.models import ForecastPrice
+    if horizon not in (24, 48, 72, 168):
+        raise HTTPException(422, detail={"error": "invalid_horizon",
+                                         "hint": "horizon must be 24, 48, 72 or 168"})
+    latest = db.execute(select(ForecastPrice.issued_at_utc)
+                        .where(ForecastPrice.area_eic == area)
+                        .order_by(ForecastPrice.issued_at_utc.desc())
+                        .limit(1)).scalar_one_or_none()
+    if latest is None:
+        raise HTTPException(404, detail={
+            "error": "no_price_forecast",
+            "hint": "Run `python scripts/train_price_forecast.py` to train and issue."})
+    rows = db.execute(select(ForecastPrice)
+                      .where(ForecastPrice.area_eic == area,
+                             ForecastPrice.issued_at_utc == latest,
+                             ForecastPrice.horizon_h <= horizon)
+                      .order_by(ForecastPrice.target_ts_utc)).scalars().all()
+    card = _price_card(area)
+    bt = card.get("backtest", {})
+    return {
+        "area_eic": area,
+        "issued_at_utc": iso(latest),
+        "horizon_hours": horizon,
+        "unit": "EUR/MWh",
+        "model_version": rows[0].model_version if rows else "unknown",
+        "forecast": [{"ts_utc": iso(r.target_ts_utc), "horizon_h": r.horizon_h,
+                      "eur_p10": round(r.p10_eur, 2), "eur_p50": round(r.p50_eur, 2),
+                      "eur_p90": round(r.p90_eur, 2)} for r in rows],
+        "backtest_summary": bt,
+        "beats_naive_baseline": card.get("beats_naive_baseline"),
+        "skill_vs_best_naive_pct": card.get("skill_vs_best_naive_pct"),
+        "key_input": card.get("key_input"),
+        "known_weaknesses": card.get("known_weaknesses", []),
+        "disclaimer": "Probabilistic price range for decision support. "
+                      "Not a trading signal and not a guaranteed outcome.",
+    }
+
+
+@router.get("/price/explain")
+def forecast_price_explain(area: str = "10Y1001A1001A73I", horizon: int = 24):
+    """SHAP drivers for the price forecast, in EUR/MWh per feature."""
+    from ..forecasting.price_model import PriceForecaster
+    from ..services.forecast_service import (_load_forecast_series,
+                                             _price_history_from_db)
+    s = get_settings()
+    pf = PriceForecaster(s.model_dir, area)
+    if not pf.load_models():
+        raise HTTPException(404, detail={"error": "no_price_model"})
+    db = SessionLocal()
+    try:
+        hist = _price_history_from_db(db, area)
+        load_fc = _load_forecast_series(db, s.forecast_default_area)
+    finally:
+        db.close()
+    if len(hist) < 200 or load_fc.empty:
+        raise HTTPException(404, detail={"error": "insufficient_history"})
+    return {"area_eic": area, "unit": "EUR/MWh",
+            "points": pf.explain(hist, load_fc, horizon),
+            "method": "TreeSHAP on LightGBM p50 price model"}
+
+
+@router.get("/price/modelcard")
+def price_model_card(area: str = "10Y1001A1001A73I"):
+    card = _price_card(area)
+    if not card:
+        raise HTTPException(404, detail={"error": "no_price_model_card"})
     return card
