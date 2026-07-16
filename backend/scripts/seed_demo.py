@@ -37,9 +37,17 @@ def main():
     db.commit()
 
     print("Seeding EIC codes ...")
+    # upsert, not insert: safe to re-run, and immune to a duplicate sneaking
+    # into EIC_SEED (which used to fail only in CI, on an empty database)
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     for e in EIC_SEED:
-        db.add(EicCode(eic_code=e.eic, code_type=e.code_type,
-                       display_name=e.name, aliases=e.aliases, country=e.country))
+        stmt = sqlite_insert(EicCode).values(
+            eic_code=e.eic, code_type=e.code_type, display_name=e.name,
+            aliases=e.aliases, country=e.country)
+        db.execute(stmt.on_conflict_do_update(
+            index_elements=["eic_code"],
+            set_={"display_name": e.name, "aliases": e.aliases,
+                  "code_type": e.code_type, "country": e.country}))
     db.commit()
 
     print(f"Generating {DAYS_HISTORY} days of hourly history (load/prices/flows) ...")

@@ -89,7 +89,14 @@ def main():
     print(f"  model WAPE      : {m['wape_model']}%")
     print(f"  naive weekly    : {m['wape_naive_weekly']}%    naive daily: {m['wape_naive_daily']}%")
     print(f"  MAE             : {m['mae_model_eur_mwh']} EUR/MWh   RMSE: {m['rmse_model_eur_mwh']}")
-    print(f"  p10-p90 coverage: {m['p10_p90_coverage_pct']}%  (target ~80%)")
+    tgt = m.get('coverage_target_pct', 80)
+    cov, raw = m['p10_p90_coverage_pct'], m.get('p10_p90_coverage_uncalibrated_pct')
+    flag = "OK" if abs(cov - tgt) <= 7 else "CHECK"
+    print(f"  p10-p90 coverage: {cov}%  (target {tgt}%)  [{flag}]")
+    print(f"    uncalibrated  : {raw}%   -> conformal widening "
+          f"+/-{m.get('conformal_widening_eur_mwh')} EUR/MWh")
+    print(f"    mean band width: {m.get('mean_band_width_eur_mwh')} EUR/MWh "
+          f"(calibrated on {m.get('calibration_hours')} h)")
     print(f"  beats naive     : {res.model_card['beats_naive_baseline']}"
           f"   (skill {res.model_card['skill_vs_best_naive_pct']}%)")
     if not res.model_card["beats_naive_baseline"]:

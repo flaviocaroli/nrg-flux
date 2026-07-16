@@ -36,7 +36,6 @@ EIC_SEED: list[EicSeed] = [
     EicSeed("10YGR-HTSO-----Y", "area", "Greece (GR)", "greece,gr,ipto", "GR"),
     EicSeed("10Y1001A1001A885", "area", "Montenegro (ME)", "montenegro,me,cges", "ME"),
     # --- major EU zones for expansion (section 13, weeks 11-12) ---
-    EicSeed("10Y1001A1001A82H", "area", "Germany-Luxembourg (DE-LU)", "germany,de,de-lu", "DE"),
     EicSeed("10YES-REE------0", "area", "Spain (ES)", "spain,es,ree", "ES"),
     EicSeed("10Y1001A1001A82H", "area", "Germany-Luxembourg (DE-LU)",
             "germany,de,de-lu,deutschland,germany-luxembourg", "DE"),
@@ -57,6 +56,26 @@ IT_BORDERS: list[tuple[str, str, str]] = [
     ("10YGR-HTSO-----Y", "10Y1001A1001A788", "GR → IT-South"),
     ("10Y1001A1001A885", "10Y1001A1001A71M", "ME → IT-Centre-South"),
 ]
+
+def _dedupe_seed(seeds: list[EicSeed]) -> list[EicSeed]:
+    """Keep the first entry per EIC code.
+
+    A duplicate here used to blow up seed_demo.py with a UNIQUE constraint
+    error (and only in CI, where the DB starts empty). Deduping at import
+    time makes the registry safe to extend.
+    """
+    seen: set[str] = set()
+    out: list[EicSeed] = []
+    for e in seeds:
+        if e.eic in seen:
+            continue
+        seen.add(e.eic)
+        out.append(e)
+    return out
+
+
+EIC_SEED = _dedupe_seed(EIC_SEED)
+
 
 # ---------------------------------------------------------------- EU markets
 # Every market below is served by the SAME ENTSO-E token — no new credentials.

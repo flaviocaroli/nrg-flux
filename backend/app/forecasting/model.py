@@ -22,7 +22,8 @@ import pandas as pd
 
 from .features import FEATURES, FRIENDLY, build_inference_frame, build_training_frame
 
-MODEL_VERSION = "0.1.0"
+MODEL_VERSION = "0.2.0"
+TARGET_COVERAGE = 0.80
 QUANTILES = {"p10": 0.10, "p50": 0.50, "p90": 0.90}
 
 LGB_PARAMS = dict(
@@ -53,27 +54,51 @@ class LoadForecaster:
         self.area_eic = area_eic
         self.boosters: dict[str, lgb.Booster] = {}
         self.model_card: dict = {}
+        self.conformal_q: float = 0.0     # CQR widening (MW), learned at train
 
     # ------------------------------------------------------------- training
 
-    def train(self, load: pd.Series, temp: pd.Series, n_rounds: int = 400) -> TrainResult:
+    def train(self, load: pd.Series, temp: pd.Series, n_rounds: int = 400,
+              source: str = "unknown") -> TrainResult:
         df = build_training_frame(load, temp)
-        # hold out the last 8 weeks for the backtest
-        cutoff = df.index[-1] - pd.Timedelta(weeks=8)
-        train_df, test_df = df[df.index <= cutoff], df[df.index > cutoff]
+        # Hold out the last 8 weeks — but never more than 25% of the history,
+        # otherwise a short backfill leaves nothing to train on.
+        holdout = min(int(len(df) * 0.25), 24 * 7 * 8)
+        if len(df) - holdout < 24 * 21:
+            raise RuntimeError(
+                f"not enough history to train and backtest ({len(df)}h). "
+                f"Backfill more days: scripts/backfill_entsoe.py --days 120")
+        trainval, test_df = df.iloc[:-holdout], df.iloc[-holdout:]
+
+        # Conformalized Quantile Regression: hold out a calibration slice so the
+        # p10-p90 band can be corrected to its nominal coverage instead of
+        # being systematically too narrow (raw GBM quantiles under-cover).
+        n_tv = len(trainval)
+        cal_n = int(min(max(n_tv * 0.20, 72), 24 * 14, n_tv * 0.40))
+        train_df, cal_df = trainval.iloc[:-cal_n], trainval.iloc[-cal_n:]
 
         for name, alpha in QUANTILES.items():
             params = {**LGB_PARAMS, "alpha": alpha}
             dtrain = lgb.Dataset(train_df[FEATURES], label=train_df["y"])
             self.boosters[name] = lgb.train(params, dtrain, num_boost_round=n_rounds)
 
+        y_cal = cal_df["y"].to_numpy()
+        lo_cal = self.boosters["p10"].predict(cal_df[FEATURES])
+        hi_cal = self.boosters["p90"].predict(cal_df[FEATURES])
+        scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
+        level = min(np.ceil((len(scores) + 1) * TARGET_COVERAGE) / len(scores), 1.0)
+        self.conformal_q = float(np.quantile(scores, level, method="higher"))
+
         # --- backtest vs naive previous-week baseline ---
         y = test_df["y"].to_numpy()
         p50 = self.boosters["p50"].predict(test_df[FEATURES])
-        p10 = self.boosters["p10"].predict(test_df[FEATURES])
-        p90 = self.boosters["p90"].predict(test_df[FEATURES])
+        p10_raw = self.boosters["p10"].predict(test_df[FEATURES])
+        p90_raw = self.boosters["p90"].predict(test_df[FEATURES])
+        p10 = p10_raw - self.conformal_q
+        p90 = p90_raw + self.conformal_q
         naive = test_df["load_lag_168h"].to_numpy()
         coverage = float(np.mean((y >= p10) & (y <= p90)) * 100)
+        coverage_raw = float(np.mean((y >= p10_raw) & (y <= p90_raw)) * 100)
 
         metrics = {
             "wape_model": round(wape(y, p50), 2),
@@ -81,6 +106,9 @@ class LoadForecaster:
             "mape_model": round(mape(y, p50), 2),
             "rmse_model": round(float(np.sqrt(np.mean((y - p50) ** 2))), 1),
             "p10_p90_coverage_pct": round(coverage, 1),
+            "p10_p90_coverage_uncalibrated_pct": round(coverage_raw, 1),
+            "coverage_target_pct": round(TARGET_COVERAGE * 100, 1),
+            "conformal_widening_mw": round(self.conformal_q, 1),
             "test_hours": int(len(test_df)),
         }
         beats_baseline = metrics["wape_model"] < metrics["wape_naive_weekly"]
@@ -93,6 +121,14 @@ class LoadForecaster:
             "training_window": [str(train_df.index[0]), str(train_df.index[-1])],
             "backtest_window": [str(test_df.index[0]), str(test_df.index[-1])],
             "features": FEATURES,
+            "training_source": source,
+            "calibration": {
+                "method": "Conformalized Quantile Regression (split conformal)",
+                "target_coverage_pct": round(TARGET_COVERAGE * 100, 1),
+                "conformal_q_mw": round(self.conformal_q, 2),
+                "calibration_hours": int(cal_n),
+            },
+            "load_range_mw": [round(float(load.min())), round(float(load.max()))],
             "backtest": metrics,
             "beats_naive_baseline": bool(beats_baseline),
             "known_weaknesses": [
@@ -121,6 +157,8 @@ class LoadForecaster:
             if os.path.exists(card):
                 with open(card) as f:
                     self.model_card = json.load(f)
+                self.conformal_q = float(
+                    self.model_card.get("calibration", {}).get("conformal_q_mw", 0.0))
             return True
         except Exception:
             return False
@@ -131,6 +169,9 @@ class LoadForecaster:
         out = pd.DataFrame(index=X.index)
         for name in QUANTILES:
             out[name] = self.boosters[name].predict(X[FEATURES])
+        # conformal widening, validated in the backtest
+        out["p10"] = out["p10"] - self.conformal_q
+        out["p90"] = out["p90"] + self.conformal_q
         # enforce monotone quantiles
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])

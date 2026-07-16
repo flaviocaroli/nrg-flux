@@ -289,3 +289,25 @@ def test_outage_id_stable_across_documents():
     a = parse_unavailability_document(OUTAGE_XML)[0]
     b = parse_unavailability_document(OUTAGE_XML.replace("OUTDOC-123", "OUTDOC-999"))[0]
     assert a["outage_id"] == b["outage_id"]
+
+
+# ------------------------------------------------- registry integrity
+
+def test_eic_seed_has_no_duplicates():
+    """Regression: a duplicated EIC broke seed_demo.py in CI (UNIQUE constraint)."""
+    from collections import Counter
+    from app.utils.eic import EIC_SEED
+    dups = {k: v for k, v in Counter(e.eic for e in EIC_SEED).items() if v > 1}
+    assert not dups, f"duplicate EIC codes in EIC_SEED: {dups}"
+
+
+def test_eu_markets_reference_known_eics():
+    """Every market's zones/national must exist in the seed registry."""
+    from app.utils.eic import EIC_SEED, EU_MARKETS
+    known = {e.eic for e in EIC_SEED}
+    missing = []
+    for cc, m in EU_MARKETS.items():
+        for z in [m["national"], *m["zones"]]:
+            if z not in known:
+                missing.append((cc, z))
+    assert not missing, f"markets reference unseeded EICs: {missing}"
