@@ -23,7 +23,8 @@ import pandas as pd  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
-from app.db.models import LoadActual, PriceDayAhead, SessionLocal, init_db  # noqa: E402
+from app.db.models import (FuelPrice, LoadActual, PriceDayAhead,  # noqa: E402
+                           SessionLocal, init_db)
 from app.forecasting.price_model import PriceForecaster  # noqa: E402
 from app.services.forecast_service import issue_price_forecast  # noqa: E402
 
@@ -41,6 +42,16 @@ def series_from(db, model, area, value_attr, days=400):
     return pd.Series([getattr(r, value_attr) for r in rows], index=idx).sort_index()
 
 
+def gas_series(db) -> pd.Series:
+    """TTF daily settlements from the DB (empty Series if none ingested)."""
+    rows = db.execute(select(FuelPrice).where(FuelPrice.fuel == "TTF")
+                      .order_by(FuelPrice.day)).scalars().all()
+    if not rows:
+        return pd.Series(dtype=float)
+    idx = pd.DatetimeIndex([pd.Timestamp(r.day, tz="UTC") for r in rows])
+    return pd.Series([r.price for r in rows], index=idx)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--area", default="10Y1001A1001A73I", help="zone EIC for prices")
@@ -53,6 +64,7 @@ def main():
     try:
         price = series_from(db, PriceDayAhead, args.area, "price_eur_mwh")
         load = series_from(db, LoadActual, s.forecast_default_area, "load_mw")
+        gas = gas_series(db)
     finally:
         db.close()
 
@@ -62,9 +74,15 @@ def main():
     if load.empty:
         sys.exit("No load history found — needed as the key price driver.")
 
+    if gas.empty:
+        print("  ! No TTF gas data — the gas feature will be inert (zeros).")
+        print("    Ingest some:  python scripts/ingest_fuel.py --provider manual --price 35")
+    else:
+        print(f"  gas: {len(gas)} daily TTF settlements, latest {float(gas.iloc[-1]):.2f} EUR/MWh")
+
     print(f"Training price model for {args.area} on {len(price)} hourly prices ...")
     pf = PriceForecaster(s.model_dir, args.area)
-    res = pf.train(price, load)
+    res = pf.train(price, load, gas=gas if not gas.empty else None)
     m = res.metrics
 
     print("\n=== Price backtest (last 4 weeks hold-out) ===")

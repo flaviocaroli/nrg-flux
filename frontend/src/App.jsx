@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from './lib/api'
 import { C, Chart, axisBase, tooltipBase } from './components/Chart'
 import ZoneSchematic from './components/ZoneSchematic'
+import ItalyMap from './components/ItalyMap'
+import EuropeMap from './components/EuropeMap'
 import DataCatalog from './components/DataCatalog'
 
 const fmtHour = (iso) =>
@@ -17,6 +19,7 @@ export default function App() {
   const [pfc, setPfc] = useState(null)
   const [err, setErr] = useState(null)
   const [explHour, setExplHour] = useState(19)
+  const [gridView, setGridView] = useState('eu')  // 'eu' | 'map' | 'schematic'
 
   useEffect(() => {
     const load = () => {
@@ -221,8 +224,16 @@ export default function App() {
           <Chart option={priceOption} />
         </div>
         <div className="panel">
-          <h2>Zonal grid · live imports <span className="tag">physical flows, MW</span></h2>
-          <ZoneSchematic flows={dash.flows_now} prices={dash.prices} />
+          <h2>Zonal grid · live imports <span className="tag">physical flows, MW</span>
+            <span className="view-toggle">
+              <button className={gridView === 'eu' ? 'on' : ''} onClick={() => setGridView('eu')}>EU</button>
+              <button className={gridView === 'map' ? 'on' : ''} onClick={() => setGridView('map')}>Italy</button>
+              <button className={gridView === 'schematic' ? 'on' : ''} onClick={() => setGridView('schematic')}>schematic</button>
+            </span>
+          </h2>
+          {gridView === 'eu' ? <EuropeMap dash={dash} markets={dash.markets || {}} />
+            : gridView === 'map' ? <ItalyMap dash={dash} />
+            : <ZoneSchematic flows={dash.flows_now} prices={dash.prices} />}
         </div>
       </div>
 

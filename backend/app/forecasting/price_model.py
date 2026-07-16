@@ -35,7 +35,13 @@ PRICE_FEATURES = [
     "load_p50", "load_ramp_3h", "load_vs_week_mean",
     "price_lag_24h", "price_lag_168h",
     "price_roll_24h_mean", "price_roll_168h_mean", "price_roll_24h_std",
+    # --- fuel block: the marginal generator in EU power is usually gas ---
+    "gas_ttf", "gas_ttf_chg_7d", "spark_spread",
 ]
+
+# Efficiency of a modern CCGT. spark_spread = power - gas/efficiency, i.e. the
+# margin of the marginal gas plant. When it collapses, gas sets the price.
+CCGT_EFFICIENCY = 0.55
 
 LGB_PARAMS = dict(
     objective="quantile", metric="quantile", learning_rate=0.05,
@@ -53,6 +59,9 @@ FRIENDLY_PRICE = {
     "price_roll_24h_mean": "24h average price",
     "price_roll_168h_mean": "7-day average price",
     "price_roll_24h_std": "recent price volatility",
+    "gas_ttf": "TTF gas price",
+    "gas_ttf_chg_7d": "gas price change (7d)",
+    "spark_spread": "spark spread (CCGT margin)",
 }
 
 
@@ -65,7 +74,8 @@ def pinball(a: np.ndarray, p: np.ndarray, q: float) -> float:
     return float(np.mean(np.maximum(q * d, (q - 1) * d)))
 
 
-def _build_frame(price: pd.Series, load: pd.Series) -> pd.DataFrame:
+def _build_frame(price: pd.Series, load: pd.Series,
+                 gas: pd.Series | None = None) -> pd.DataFrame:
     """Feature matrix aligned on the price index."""
     df = calendar_frame(price.index)
     df["y"] = price.values
@@ -80,7 +90,34 @@ def _build_frame(price: pd.Series, load: pd.Series) -> pd.DataFrame:
     df["price_roll_24h_mean"] = price.shift(1).rolling(24, min_periods=1).mean().values
     df["price_roll_168h_mean"] = price.shift(1).rolling(168, min_periods=1).mean().values
     df["price_roll_24h_std"] = price.shift(1).rolling(24, min_periods=2).std().fillna(0).values
+    _attach_gas(df, price.index, gas, price.shift(24))   # lagged: no leakage
     return df.dropna(subset=["price_lag_168h"])
+
+
+def _attach_gas(df: pd.DataFrame, idx, gas: pd.Series | None,
+                power_known: pd.Series | None = None) -> None:
+    """Add the fuel block.
+
+    CRITICAL — no target leakage: `spark_spread` must be built from a price
+    that is KNOWN at forecast time (yesterday's same-hour price), never the
+    contemporaneous price, which is the target itself. Using the current price
+    here would let the model read the answer and produce backtest results that
+    collapse in production.
+    """
+    if gas is None or len(gas) == 0:
+        df["gas_ttf"] = 0.0
+        df["gas_ttf_chg_7d"] = 0.0
+        df["spark_spread"] = 0.0
+        return
+    from ..ingestion.fuel import to_hourly
+    g = to_hourly(gas, idx)
+    df["gas_ttf"] = g.values
+    df["gas_ttf_chg_7d"] = g.diff(24 * 7).fillna(0).values
+    if power_known is not None:
+        # margin of the marginal CCGT, using the last price we actually knew
+        df["spark_spread"] = (power_known.values - g.values / CCGT_EFFICIENCY)
+    else:
+        df["spark_spread"] = 0.0
 
 
 @dataclass
@@ -106,8 +143,9 @@ class PriceForecaster:
 
     # ------------------------------------------------------------- training
 
-    def train(self, price: pd.Series, load: pd.Series, n_rounds: int = 350) -> PriceTrainResult:
-        df = _build_frame(price, load)
+    def train(self, price: pd.Series, load: pd.Series,
+              gas: pd.Series | None = None, n_rounds: int = 350) -> PriceTrainResult:
+        df = _build_frame(price, load, gas)
         if len(df) < 24 * 30:
             raise RuntimeError("need at least ~30 days of overlapping price+load history")
         cutoff = df.index[-1] - pd.Timedelta(weeks=4)
@@ -150,11 +188,12 @@ class PriceForecaster:
             "backtest_window": [str(test_df.index[0]), str(test_df.index[-1])],
             "features": PRICE_FEATURES,
             "key_input": "NRG-Flux load forecast p50 (our own model)",
+            "gas_feature_active": bool(gas is not None and len(gas) > 0),
             "backtest": metrics,
             "beats_naive_baseline": bool(beats),
             "skill_vs_best_naive_pct": lift,
             "known_weaknesses": [
-                "Fuel-price (gas/CO2) shocks are not modelled — no fuel curve input",
+                "Carbon (EUA) not yet modelled; gas active only if a TTF feed is configured",
                 "Scarcity spikes and negative-price hours are systematically under-predicted",
                 "Market-design or capacity changes break historical relationships",
                 "Accuracy degrades most in the highest and lowest price deciles",
@@ -184,7 +223,7 @@ class PriceForecaster:
             return False
 
     def _inference_frame(self, price_hist: pd.Series, load_fc: pd.Series,
-                         horizon: int) -> pd.DataFrame:
+                         horizon: int, gas: pd.Series | None = None) -> pd.DataFrame:
         idx = pd.date_range(price_hist.index[-1] + pd.Timedelta(hours=1),
                             periods=horizon, freq="h", tz="UTC")
         df = calendar_frame(idx)
@@ -205,11 +244,15 @@ class PriceForecaster:
         df["price_roll_24h_mean"] = float(price_hist.tail(24).mean())
         df["price_roll_168h_mean"] = float(price_hist.tail(168).mean())
         df["price_roll_24h_std"] = float(price_hist.tail(24).std() or 0.0)
+        # forward gas: hold the last known settlement flat across the horizon
+        # same construction as training: spark spread off the known price lag
+        known = pd.Series(df["price_lag_24h"].values, index=idx)
+        _attach_gas(df, idx, gas, known)
         return df[PRICE_FEATURES].fillna(0.0)
 
     def predict(self, price_hist: pd.Series, load_fc: pd.Series,
-                horizon: int = 48) -> pd.DataFrame:
-        X = self._inference_frame(price_hist, load_fc, horizon)
+                horizon: int = 48, gas: pd.Series | None = None) -> pd.DataFrame:
+        X = self._inference_frame(price_hist, load_fc, horizon, gas)
         out = pd.DataFrame(index=X.index)
         for q in QUANTILES:
             out[q] = self.boosters[q].predict(X[PRICE_FEATURES])
@@ -218,8 +261,9 @@ class PriceForecaster:
         return out
 
     def explain(self, price_hist: pd.Series, load_fc: pd.Series,
-                horizon: int = 48, top_k: int = 6) -> list[dict]:
-        X = self._inference_frame(price_hist, load_fc, horizon)
+                horizon: int = 48, top_k: int = 6,
+                gas: pd.Series | None = None) -> list[dict]:
+        X = self._inference_frame(price_hist, load_fc, horizon, gas)
         contrib = self.boosters["p50"].predict(X[PRICE_FEATURES], pred_contrib=True)
         rows = []
         for i, ts in enumerate(X.index):

@@ -136,6 +136,16 @@ def _load_forecast_series(db: Session, area_national: str) -> pd.Series:
     return pd.Series([r.p50_mw for r in rows], index=idx)
 
 
+def _gas_series(db: Session) -> pd.Series:
+    from ..db.models import FuelPrice
+    rows = db.execute(select(FuelPrice).where(FuelPrice.fuel == "TTF")
+                      .order_by(FuelPrice.day)).scalars().all()
+    if not rows:
+        return pd.Series(dtype=float)
+    idx = pd.DatetimeIndex([pd.Timestamp(r.day, tz="UTC") for r in rows])
+    return pd.Series([r.price for r in rows], index=idx)
+
+
 def issue_price_forecast(area: str, horizon_hours: int = 48) -> dict:
     """Train-free: load the price model and persist a fresh price forecast."""
     from ..db.models import ForecastPrice
@@ -153,7 +163,9 @@ def issue_price_forecast(area: str, horizon_hours: int = 48) -> dict:
         load_fc = _load_forecast_series(db, s.forecast_default_area)
         if load_fc.empty:
             raise RuntimeError("No load forecast issued yet — run train_forecast.py first")
-        pred = pf.predict(price_hist, load_fc, horizon_hours)
+        gas = _gas_series(db)
+        pred = pf.predict(price_hist, load_fc, horizon_hours,
+                          gas=gas if not gas.empty else None)
 
         issued = datetime.now(timezone.utc)
         db.execute(delete(ForecastPrice).where(ForecastPrice.area_eic == area))

@@ -159,6 +159,23 @@ class RawDocument(Base):
     parser_version: Mapped[str] = mapped_column(String(16), default="1.0.0")
 
 
+class FuelPrice(Base):
+    """Daily fuel/carbon settlements (TTF gas, EUA carbon).
+
+    Not from ENTSO-E — see app/ingestion/fuel.py for provider notes and the
+    licensing caveat. Stored daily; forward-filled to hourly at feature time.
+    """
+    __tablename__ = "fuel_prices"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fuel: Mapped[str] = mapped_column(String(12), index=True)      # TTF | EUA
+    day: Mapped[str] = mapped_column(String(10), index=True)       # YYYY-MM-DD
+    price: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(16), default="EUR/MWh")
+    provider: Mapped[str] = mapped_column(String(24), default="csv")
+    retrieved_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_fuel_day", "fuel", "day", unique=True),)
+
+
 class ForecastPrice(Base):
     """Day-ahead price forecast (p10/p50/p90) per area and issue time."""
     __tablename__ = "forecast_price"
