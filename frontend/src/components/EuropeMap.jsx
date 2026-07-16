@@ -2,56 +2,104 @@ import { useState } from 'react'
 import { C } from './Chart'
 
 /*
- * EuropeMap — the multi-market view. Italy sits at the centre with its six
- * bidding zones; the surrounding markets (FR, DE-LU, CH, AT, SI, ES, GB, NL,
- * BE, GR) are drawn as neighbouring blocks, each coloured by its day-ahead
- * price when we have it and dimmed when we don't.
+ * EuropeMap — real geography.
  *
- * Stylised geography, not GeoJSON: it stays dependency-free, themeable and
- * legible at panel size. Shapes are recognisable rather than survey-accurate —
- * the point is that a trader instantly sees WHERE the spread is.
+ * Country outlines are simplified TRUE lat/lon boundaries, projected with an
+ * equirectangular projection carrying a cos(lat) correction so shapes don't
+ * smear at northern latitudes. Italy is split into its six bidding zones along
+ * the actual regional groupings (NORD = Po valley + Alps + Liguria,
+ * CNOR = Tuscany/Umbria/Marche, CSUD = Lazio/Abruzzo/Campania,
+ * SUD = Molise/Puglia/Basilicata/Calabria, plus the two islands).
  *
- * Props:
- *   dash    — the /v1/dashboard/italy payload (prices + flows_now)
- *   markets — optional { CC: {price, load} } for non-Italian markets
+ * Colour = day-ahead price heat. Dashed outline = market not backfilled yet
+ * (run scripts/backfill_eu.py). Arrows = live physical flows.
  */
 
-// --- Italian bidding zones (centre) ---
+// ---- projection -----------------------------------------------------------
+const LON_MIN = -10.5, LAT_MAX = 59.5, LAT_MIN = 35.0
+const K = 23                                   // px per degree of latitude
+const COS_MID = Math.cos((46 * Math.PI) / 180) // longitude compression
+const VB_W = Math.round((27 - LON_MIN) * K * COS_MID)
+const VB_H = Math.round((LAT_MAX - LAT_MIN) * K)
+
+const px = ([lat, lon]) => [(lon - LON_MIN) * K * COS_MID, (LAT_MAX - lat) * K]
+const toPath = (co) =>
+  'M' + co.map((c) => px(c).map((n) => n.toFixed(1)).join(',')).join(' L') + ' Z'
+const centroid = (co) => {
+  const p = co.map(px)
+  return [p.reduce((a, q) => a + q[0], 0) / p.length,
+          p.reduce((a, q) => a + q[1], 0) / p.length]
+}
+
+// ---- Italian bidding zones (lat, lon) ------------------------------------
 const IT_ZONES = {
-  NORD: { path: 'M300,225 L410,218 L438,258 L410,282 L320,283 L292,252 Z', cx: 360, cy: 250 },
-  CNOR: { path: 'M320,283 L410,282 L404,325 L352,338 L326,318 Z', cx: 364, cy: 308 },
-  CSUD: { path: 'M352,338 L404,325 L424,372 L400,400 L364,390 L346,360 Z', cx: 384, cy: 362 },
-  SUD:  { path: 'M364,390 L400,400 L430,442 L410,478 L378,472 L366,432 Z', cx: 393, cy: 434 },
-  SICI: { path: 'M366,492 L410,492 L420,518 L390,532 L362,516 Z', cx: 390, cy: 510 },
-  SARD: { path: 'M252,362 L286,358 L292,406 L266,426 L244,400 Z', cx: 268, cy: 392 },
+  NORD: [[46.5, 8.4], [46.0, 6.8], [44.9, 6.9], [44.1, 7.5], [43.8, 7.6], [44.4, 8.9],
+         [44.3, 9.9], [44.2, 12.2], [44.9, 12.4], [45.6, 13.6], [46.5, 13.6], [46.7, 11.2]],
+  CNOR: [[44.3, 9.9], [43.4, 10.3], [42.9, 10.7], [42.4, 11.6], [42.5, 12.9], [42.9, 13.9],
+         [43.6, 13.6], [44.2, 12.4], [44.2, 12.2]],
+  CSUD: [[42.4, 11.6], [41.4, 12.9], [40.8, 14.0], [40.6, 14.9], [40.9, 15.4], [41.5, 15.0],
+         [42.0, 14.5], [42.9, 13.9], [42.5, 12.9]],
+  SUD:  [[41.5, 15.0], [41.9, 15.9], [41.4, 16.9], [40.5, 18.4], [40.0, 18.0], [39.9, 16.6],
+         [39.3, 17.1], [38.5, 16.6], [38.0, 15.9], [38.3, 15.6], [39.0, 16.0], [39.8, 15.7],
+         [40.4, 15.0], [40.6, 14.9], [40.9, 15.4]],
+  SICI: [[38.2, 12.4], [38.1, 13.4], [38.0, 15.1], [37.4, 15.1], [36.7, 15.1], [36.7, 14.5],
+         [37.0, 12.8], [37.8, 12.4]],
+  SARD: [[41.2, 9.2], [41.1, 9.6], [40.5, 9.8], [39.2, 9.6], [38.9, 8.8], [39.2, 8.4],
+         [40.0, 8.4], [40.6, 8.2], [41.0, 8.3]],
 }
 
-// --- neighbouring markets ---
+// ---- neighbouring markets -------------------------------------------------
 const COUNTRIES = {
-  FR: { path: 'M150,215 L268,205 L288,268 L262,330 L182,338 L140,282 Z', cx: 212, cy: 272, name: 'France' },
-  DE: { path: 'M300,105 L400,98 L420,170 L392,212 L306,218 L288,150 Z', cx: 352, cy: 158, name: 'Germany-Lux' },
-  CH: { path: 'M282,205 L344,200 L352,238 L296,244 L272,228 Z', cx: 312, cy: 222, name: 'Switzerland' },
-  AT: { path: 'M400,180 L482,172 L492,212 L418,222 L396,206 Z', cx: 444, cy: 198, name: 'Austria' },
-  SI: { path: 'M456,222 L508,218 L516,250 L462,254 Z', cx: 486, cy: 236, name: 'Slovenia' },
-  NL: { path: 'M268,60 L340,54 L348,96 L282,102 Z', cx: 308, cy: 78, name: 'Netherlands' },
-  BE: { path: 'M226,102 L292,96 L300,138 L238,144 Z', cx: 264, cy: 120, name: 'Belgium' },
-  GB: { path: 'M120,60 L196,52 L212,120 L176,168 L124,150 L104,100 Z', cx: 158, cy: 108, name: 'Great Britain' },
-  ES: { path: 'M78,340 L188,332 L206,398 L160,442 L86,432 L58,384 Z', cx: 132, cy: 388, name: 'Spain' },
-  GR: { path: 'M498,410 L556,404 L568,452 L516,470 L490,438 Z', cx: 528, cy: 436, name: 'Greece' },
+  FR: { name: 'France', c: [[51.0, 2.5], [49.5, 0.1], [48.6, -1.5], [48.5, -4.7], [47.3, -2.2],
+        [46.2, -1.2], [44.7, -1.2], [43.4, -1.8], [42.8, 0.7], [42.5, 3.2], [43.3, 4.8],
+        [43.7, 7.4], [45.0, 6.9], [46.4, 6.1], [47.5, 7.6], [49.0, 8.2], [49.5, 6.4],
+        [50.4, 4.2]] },
+  DE: { name: 'Germany-Lux', c: [[54.8, 8.4], [54.4, 11.0], [54.2, 13.5], [53.9, 14.2],
+        [52.0, 14.6], [50.9, 15.0], [50.2, 12.1], [48.8, 13.8], [47.7, 13.0], [47.5, 10.2],
+        [47.6, 7.6], [49.0, 8.2], [49.5, 6.4], [50.8, 6.0], [51.9, 6.0], [53.5, 7.2]] },
+  CH: { name: 'Switzerland', c: [[47.6, 7.6], [47.7, 8.6], [47.5, 9.6], [46.9, 10.5],
+        [46.4, 9.9], [46.0, 8.9], [46.0, 8.4], [45.9, 7.0], [46.2, 6.1], [46.9, 6.4],
+        [47.4, 7.0]] },
+  AT: { name: 'Austria', c: [[48.6, 13.8], [48.8, 15.0], [48.7, 16.9], [47.7, 16.5],
+        [46.7, 16.0], [46.4, 14.6], [46.5, 13.7], [46.8, 12.2], [47.0, 10.4], [47.5, 10.2],
+        [47.7, 13.0]] },
+  SI: { name: 'Slovenia', c: [[46.9, 13.7], [46.7, 16.6], [45.8, 16.0], [45.4, 15.3],
+        [45.5, 13.6], [46.4, 13.6]] },
+  NL: { name: 'Netherlands', c: [[53.4, 6.9], [53.2, 7.2], [52.4, 7.1], [51.9, 6.0],
+        [51.2, 6.0], [51.3, 4.2], [51.8, 3.6], [52.6, 4.6], [53.2, 4.8]] },
+  BE: { name: 'Belgium', c: [[51.5, 3.4], [51.4, 4.9], [51.0, 6.0], [50.2, 6.4], [49.5, 5.8],
+        [49.6, 4.8], [50.4, 3.2], [51.1, 2.5]] },
+  GB: { name: 'Great Britain', c: [[58.6, -3.1], [57.5, -1.8], [56.0, -2.5], [55.0, -1.4],
+        [54.1, -0.2], [53.0, 0.3], [52.0, 1.7], [51.4, 1.4], [50.8, 0.3], [50.6, -1.9],
+        [50.2, -3.6], [50.0, -5.7], [51.2, -4.2], [51.6, -3.2], [52.9, -4.8], [53.4, -3.1],
+        [54.1, -3.2], [54.9, -3.6], [55.9, -5.0], [56.7, -5.8], [57.6, -5.9], [58.6, -5.0]] },
+  ES: { name: 'Spain', c: [[43.4, -8.9], [43.6, -5.7], [43.4, -3.0], [43.3, -1.8], [42.5, 0.7],
+        [42.4, 3.2], [41.0, 1.0], [39.5, -0.2], [38.0, -0.6], [36.7, -2.2], [36.0, -5.6],
+        [37.2, -7.4], [38.7, -7.2], [39.7, -7.0], [41.0, -6.9], [41.9, -8.9]] },
+  GR: { name: 'Greece', c: [[41.0, 20.5], [41.4, 22.9], [41.3, 26.1], [40.8, 25.9],
+        [40.0, 24.0], [39.0, 23.5], [38.0, 24.0], [37.0, 23.2], [36.7, 22.5], [37.0, 21.4],
+        [38.3, 21.1], [39.6, 20.2], [40.5, 20.4]] },
 }
 
-// interconnector arrows: [fromKey, toKey, borderLabel]
+// geographic context only — not markets we serve
+const CONTEXT = {
+  PT: [[41.9, -8.9], [41.0, -6.9], [39.7, -7.0], [38.7, -7.2], [37.2, -7.4], [37.0, -8.9],
+       [39.4, -9.4], [41.1, -8.7]],
+  IE: [[55.2, -7.3], [54.3, -5.5], [53.3, -6.0], [52.2, -6.4], [51.5, -9.5], [52.9, -9.9],
+       [54.3, -8.8]],
+}
+
 const LINKS = [
   ['FR', 'NORD', 'FR → IT-North'], ['CH', 'NORD', 'CH → IT-North'],
   ['AT', 'NORD', 'AT → IT-North'], ['SI', 'NORD', 'SI → IT-North'],
   ['GR', 'SUD', 'GR → IT-South'], ['DE', 'CH', 'DE → CH'],
   ['FR', 'ES', 'FR → ES'], ['GB', 'FR', 'GB → FR'],
-  ['NL', 'DE', 'NL → DE'], ['BE', 'FR', 'BE → FR'],
+  ['NL', 'DE', 'NL → DE'], ['BE', 'FR', 'BE → FR'], ['FR', 'DE', 'FR → DE'],
 ]
 
 function heat(p, lo, hi) {
-  if (p == null || !isFinite(p) || hi === lo) return null
-  const t = Math.max(0, Math.min(1, (p - lo) / (hi - lo)))
+  if (p == null || !isFinite(p)) return null
+  const t = hi === lo ? 0.5 : Math.max(0, Math.min(1, (p - lo) / (hi - lo)))
   const stops = [[52, 217, 195], [255, 180, 84], [255, 90, 102]]
   const seg = t < 0.5 ? [stops[0], stops[1]] : [stops[1], stops[2]]
   const k = t < 0.5 ? t * 2 : (t - 0.5) * 2
@@ -62,43 +110,49 @@ function heat(p, lo, hi) {
 export default function EuropeMap({ dash, markets = {} }) {
   const [hover, setHover] = useState(null)
   const prices = dash?.prices || {}
-  const flows = Object.fromEntries((dash?.flows_now || []).map((f) => [f.border, f.mw]))
+  const flows = Object.fromEntries(
+    (dash?.flows_eu || dash?.flows_now || []).map((f) => [f.border, f.mw]))
 
   const itPrice = (z) => { const s = prices[z]; return s?.length ? s[s.length - 1][1] : null }
   const ccPrice = (cc) => markets?.[cc]?.price ?? null
+  const priceOf = (k) => (IT_ZONES[k] ? itPrice(k) : ccPrice(k))
+  const nameOf = (k) => (IT_ZONES[k] ? `IT · ${k}` : COUNTRIES[k]?.name || k)
 
-  const all = [...Object.keys(IT_ZONES).map(itPrice), ...Object.keys(COUNTRIES).map(ccPrice)]
-    .filter((v) => v != null && isFinite(v))
+  const all = [...Object.keys(IT_ZONES), ...Object.keys(COUNTRIES)]
+    .map(priceOf).filter((v) => v != null && isFinite(v))
   const lo = all.length ? Math.min(...all) : 0
   const hi = all.length ? Math.max(...all) : 1
 
-  const centre = (k) => IT_ZONES[k] || COUNTRIES[k]
-  const priceOf = (k) => (IT_ZONES[k] ? itPrice(k) : ccPrice(k))
-  const nameOf = (k) => (IT_ZONES[k] ? `IT · ${k}` : COUNTRIES[k].name)
+  const cent = (k) => (IT_ZONES[k] ? centroid(IT_ZONES[k])
+    : COUNTRIES[k] ? centroid(COUNTRIES[k].c) : null)
 
   return (
     <div style={{ position: 'relative' }}>
-      <svg viewBox="0 0 600 560" className="eu-map" role="img"
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="eu-map" role="img"
         aria-label="European power markets by day-ahead price with interconnector flows">
         <defs>
-          <marker id="euarrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-            <path d="M0,0 L6,3 L0,6 Z" fill={C.teal} />
+          <marker id="euarrow" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto">
+            <path d="M0,0 L5,2.5 L0,5 Z" fill={C.teal} />
           </marker>
         </defs>
 
-        {/* interconnectors under the shapes */}
+        {Object.entries(CONTEXT).map(([k, c]) => (
+          <path key={k} d={toPath(c)} fill="#141d31" stroke={C.hairline}
+            strokeWidth="0.6" opacity="0.5" />
+        ))}
+
         {LINKS.map(([a, b, label]) => {
-          const A = centre(a), B = centre(b)
+          const A = cent(a), B = cent(b)
           if (!A || !B) return null
           const mw = flows[label] || 0
-          const w = mw ? Math.max(1.4, Math.min(5, mw / 700)) : 1
           return (
-            <g key={label} opacity={mw ? 0.9 : 0.25}>
-              <line className="eu-flow" x1={A.cx} y1={A.cy} x2={B.cx} y2={B.cy}
-                stroke={C.teal} strokeWidth={w} markerEnd="url(#euarrow)" />
+            <g key={label} opacity={mw ? 0.95 : 0.16}>
+              <line className={mw ? 'eu-flow' : ''} x1={A[0]} y1={A[1]} x2={B[0]} y2={B[1]}
+                stroke={C.teal} strokeWidth={mw ? Math.max(1.2, Math.min(4.5, mw / 800)) : 0.7}
+                markerEnd={mw ? 'url(#euarrow)' : undefined} />
               {mw > 0 && (
-                <text x={(A.cx + B.cx) / 2} y={(A.cy + B.cy) / 2 - 4} fill={C.teal}
-                  fontSize="9" textAnchor="middle" fontFamily="IBM Plex Mono">
+                <text x={(A[0] + B[0]) / 2} y={(A[1] + B[1]) / 2 - 3} fill={C.teal}
+                  fontSize="8.5" textAnchor="middle" fontFamily="IBM Plex Mono">
                   {Math.round(mw)}
                 </text>
               )}
@@ -106,50 +160,50 @@ export default function EuropeMap({ dash, markets = {} }) {
           )
         })}
 
-        {/* neighbouring markets */}
         {Object.entries(COUNTRIES).map(([cc, cfg]) => {
           const p = ccPrice(cc)
           const f = heat(p, lo, hi)
           const on = hover === cc
+          const [cx, cy] = centroid(cfg.c)
           return (
             <g key={cc} onMouseEnter={() => setHover(cc)} onMouseLeave={() => setHover(null)}
               style={{ cursor: 'pointer' }}>
-              <path d={cfg.path} fill={f || C.panelRaised || '#182543'}
-                fillOpacity={f ? (on ? 0.82 : 0.55) : 0.5}
-                stroke={on ? C.chalk : C.hairline} strokeWidth={on ? 1.8 : 1}
-                strokeDasharray={f ? '0' : '4 3'} />
-              <text x={cfg.cx} y={cfg.cy} fill={f ? '#0d1424' : C.slate} fontSize="11"
+              <path d={toPath(cfg.c)} fill={f || '#182543'}
+                fillOpacity={f ? (on ? 0.88 : 0.6) : 0.5}
+                stroke={on ? C.chalk : C.hairline} strokeWidth={on ? 1.6 : 0.9}
+                strokeDasharray={f ? '0' : '3 2.5'} />
+              <text x={cx} y={cy} fill={f ? '#0d1424' : C.slate} fontSize="10"
                 fontWeight="700" textAnchor="middle" fontFamily="Space Grotesk">{cc}</text>
-              <text x={cfg.cx} y={cfg.cy + 13} fill={f ? '#0d1424' : C.slateDim} fontSize="9"
-                textAnchor="middle" fontFamily="IBM Plex Mono">
-                {p != null ? `${p.toFixed(0)}€` : 'no data'}
-              </text>
+              {p != null && (
+                <text x={cx} y={cy + 11} fill="#0d1424" fontSize="8.5" textAnchor="middle"
+                  fontFamily="IBM Plex Mono">{p.toFixed(0)}€</text>
+              )}
             </g>
           )
         })}
 
-        {/* Italy — the beachhead, drawn last so it sits on top */}
-        {Object.entries(IT_ZONES).map(([z, cfg]) => {
+        {Object.entries(IT_ZONES).map(([z, co]) => {
           const p = itPrice(z)
           const f = heat(p, lo, hi)
           const on = hover === z
+          const [cx, cy] = centroid(co)
           return (
             <g key={z} onMouseEnter={() => setHover(z)} onMouseLeave={() => setHover(null)}
               style={{ cursor: 'pointer' }}>
-              <path d={cfg.path} fill={f || '#182543'} fillOpacity={on ? 0.9 : 0.72}
-                stroke={on ? C.chalk : C.amber} strokeWidth={on ? 2 : 1.1} />
-              <text x={cfg.cx} y={cfg.cy - 1} fill="#0d1424" fontSize="10" fontWeight="700"
+              <path d={toPath(co)} fill={f || '#182543'} fillOpacity={on ? 0.92 : 0.78}
+                stroke={on ? C.chalk : C.amber} strokeWidth={on ? 1.6 : 0.9} />
+              <text x={cx} y={cy - 1} fill="#0d1424" fontSize="7.5" fontWeight="700"
                 textAnchor="middle" fontFamily="Space Grotesk">{z}</text>
-              <text x={cfg.cx} y={cfg.cy + 11} fill="#0d1424" fontSize="8.5"
-                textAnchor="middle" fontFamily="IBM Plex Mono">
-                {p != null ? `${p.toFixed(0)}€` : '—'}
-              </text>
+              {p != null && (
+                <text x={cx} y={cy + 7.5} fill="#0d1424" fontSize="6.5" textAnchor="middle"
+                  fontFamily="IBM Plex Mono">{p.toFixed(0)}</text>
+              )}
             </g>
           )
         })}
 
-        <text x="14" y="548" fill={C.slateDim} fontSize="9.5" fontFamily="IBM Plex Mono">
-          day-ahead price heat · dashed = market not yet backfilled · arrows = physical flows (MW)
+        <text x="6" y={VB_H - 6} fill={C.slateDim} fontSize="8.5" fontFamily="IBM Plex Mono">
+          price heat · dashed = not backfilled · arrows = physical flows (MW)
         </text>
       </svg>
 
@@ -162,7 +216,12 @@ export default function EuropeMap({ dash, markets = {} }) {
       {hover && (
         <div className="map-tip">
           <b>{nameOf(hover)}</b>
-          <div>{priceOf(hover) != null ? `${priceOf(hover).toFixed(2)} €/MWh` : 'not backfilled'}</div>
+          <div>{priceOf(hover) != null
+            ? `${priceOf(hover).toFixed(2)} €/MWh`
+            : 'not backfilled'}</div>
+          {markets?.[hover]?.load_mw != null && (
+            <div style={{ color: C.slate }}>{markets[hover].load_mw.toLocaleString()} MW</div>
+          )}
         </div>
       )}
     </div>

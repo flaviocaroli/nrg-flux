@@ -174,6 +174,12 @@ def forecast_price(area: str = "10Y1001A1001A73I", horizon: int = 48,
         "backtest_summary": bt,
         "beats_naive_baseline": card.get("beats_naive_baseline"),
         "skill_vs_best_naive_pct": card.get("skill_vs_best_naive_pct"),
+        "calibration": card.get("calibration"),
+        "coverage": {
+            "target_pct": bt.get("coverage_target_pct"),
+            "achieved_pct": bt.get("p10_p90_coverage_pct"),
+            "uncalibrated_pct": bt.get("p10_p90_coverage_uncalibrated_pct"),
+        },
         "key_input": card.get("key_input"),
         "known_weaknesses": card.get("known_weaknesses", []),
         "disclaimer": "Probabilistic price range for decision support. "

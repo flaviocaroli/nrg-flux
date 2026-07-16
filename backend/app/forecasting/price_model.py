@@ -35,9 +35,14 @@ PRICE_FEATURES = [
     "load_p50", "load_ramp_3h", "load_vs_week_mean",
     "price_lag_24h", "price_lag_168h",
     "price_roll_24h_mean", "price_roll_168h_mean", "price_roll_24h_std",
+    # --- volatility block: lets the quantiles widen when the market is jumpy ---
+    "price_roll_168h_std", "price_hour_std_28d", "price_range_24h",
     # --- fuel block: the marginal generator in EU power is usually gas ---
     "gas_ttf", "gas_ttf_chg_7d", "spark_spread",
 ]
+
+# Nominal coverage of the p10-p90 band. Conformal calibration enforces it.
+TARGET_COVERAGE = 0.80
 
 # Efficiency of a modern CCGT. spark_spread = power - gas/efficiency, i.e. the
 # margin of the marginal gas plant. When it collapses, gas sets the price.
@@ -59,6 +64,9 @@ FRIENDLY_PRICE = {
     "price_roll_24h_mean": "24h average price",
     "price_roll_168h_mean": "7-day average price",
     "price_roll_24h_std": "recent price volatility",
+    "price_roll_168h_std": "weekly price volatility",
+    "price_hour_std_28d": "volatility of this hour (28d)",
+    "price_range_24h": "yesterday's price range",
     "gas_ttf": "TTF gas price",
     "gas_ttf_chg_7d": "gas price change (7d)",
     "spark_spread": "spark spread (CCGT margin)",
@@ -90,6 +98,15 @@ def _build_frame(price: pd.Series, load: pd.Series,
     df["price_roll_24h_mean"] = price.shift(1).rolling(24, min_periods=1).mean().values
     df["price_roll_168h_mean"] = price.shift(1).rolling(168, min_periods=1).mean().values
     df["price_roll_24h_std"] = price.shift(1).rolling(24, min_periods=2).std().fillna(0).values
+    df["price_roll_168h_std"] = price.shift(1).rolling(168, min_periods=6).std().fillna(0).values
+    # how volatile has THIS hour-of-day been over the last 4 weeks? Peak hours
+    # are far jumpier than night hours; a single global band ignores that.
+    hour_std = (price.shift(24).groupby(price.index.hour)
+                .transform(lambda x: x.rolling(28, min_periods=3).std()))
+    df["price_hour_std_28d"] = hour_std.fillna(0).values
+    roll_max = price.shift(1).rolling(24, min_periods=2).max()
+    roll_min = price.shift(1).rolling(24, min_periods=2).min()
+    df["price_range_24h"] = (roll_max - roll_min).fillna(0).values
     _attach_gas(df, price.index, gas, price.shift(24))   # lagged: no leakage
     return df.dropna(subset=["price_lag_168h"])
 
@@ -134,6 +151,7 @@ class PriceForecaster:
         self.area_eic = area_eic
         self.boosters: dict[str, lgb.Booster] = {}
         self.model_card: dict = {}
+        self.conformal_q: float = 0.0     # CQR widening, learned at train time
 
     def _path(self, q: str) -> str:
         return os.path.join(self.model_dir, f"lgbm_price_{self.area_eic}_{q}.txt")
@@ -148,20 +166,52 @@ class PriceForecaster:
         df = _build_frame(price, load, gas)
         if len(df) < 24 * 30:
             raise RuntimeError("need at least ~30 days of overlapping price+load history")
+        # ---- three-way split: fit / calibrate / test ------------------------
+        # Conformalized Quantile Regression (Romano et al. 2019). Raw GBM
+        # quantiles are systematically too narrow on fat-tailed price data, so
+        # we hold out a CALIBRATION slice, measure how far reality falls
+        # outside the band, and widen by exactly that much. This buys a
+        # finite-sample marginal coverage guarantee instead of a hope.
         cutoff = df.index[-1] - pd.Timedelta(weeks=4)
-        train_df, test_df = df[df.index <= cutoff], df[df.index > cutoff]
+        trainval, test_df = df[df.index <= cutoff], df[df.index > cutoff]
         if test_df.empty:
-            train_df, test_df = df.iloc[:-168], df.iloc[-168:]
+            trainval, test_df = df.iloc[:-168], df.iloc[-168:]
+        # Calibration slice = the most recent 20% of the remaining history,
+        # capped at 2 weeks and floored at 72h, but never more than 40% —
+        # with short histories a fixed 2-week window can leave nothing to fit.
+        n_tv = len(trainval)
+        cal_n = int(min(max(n_tv * 0.20, 72), 24 * 14, n_tv * 0.40))
+        if n_tv - cal_n < 24 * 7:
+            raise RuntimeError(
+                f"not enough price history to fit AND calibrate "
+                f"({n_tv}h available after the test split). Backfill more days.")
+        train_df, cal_df = trainval.iloc[:-cal_n], trainval.iloc[-cal_n:]
 
         for name, alpha in QUANTILES.items():
             params = {**LGB_PARAMS, "alpha": alpha}
             dtrain = lgb.Dataset(train_df[PRICE_FEATURES], label=train_df["y"])
             self.boosters[name] = lgb.train(params, dtrain, num_boost_round=n_rounds)
 
+        # ---- conformal calibration -----------------------------------------
+        y_cal = cal_df["y"].to_numpy()
+        lo_cal = self.boosters["p10"].predict(cal_df[PRICE_FEATURES])
+        hi_cal = self.boosters["p90"].predict(cal_df[PRICE_FEATURES])
+        # conformity score: how far outside the band did reality land?
+        # (negative when inside, so the quantile below also tightens a band
+        #  that happens to be too wide)
+        scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
+        n_cal = len(scores)
+        level = min(np.ceil((n_cal + 1) * TARGET_COVERAGE) / n_cal, 1.0)
+        self.conformal_q = float(np.quantile(scores, level, method="higher"))
+        raw_cal_cov = float(np.mean((y_cal >= lo_cal) & (y_cal <= hi_cal)) * 100)
+
         y = test_df["y"].to_numpy()
         p50 = self.boosters["p50"].predict(test_df[PRICE_FEATURES])
-        p10 = self.boosters["p10"].predict(test_df[PRICE_FEATURES])
-        p90 = self.boosters["p90"].predict(test_df[PRICE_FEATURES])
+        p10_raw = self.boosters["p10"].predict(test_df[PRICE_FEATURES])
+        p90_raw = self.boosters["p90"].predict(test_df[PRICE_FEATURES])
+        # apply the correction learned on the calibration slice
+        p10 = p10_raw - self.conformal_q
+        p90 = p90_raw + self.conformal_q
         naive = test_df["price_lag_168h"].to_numpy()      # last week, same hour
         naive_d1 = test_df["price_lag_24h"].to_numpy()    # yesterday, same hour
 
@@ -173,6 +223,13 @@ class PriceForecaster:
             "rmse_model_eur_mwh": round(float(np.sqrt(np.mean((y - p50) ** 2))), 2),
             "pinball_p50": round(pinball(y, p50, 0.5), 3),
             "p10_p90_coverage_pct": round(float(np.mean((y >= p10) & (y <= p90)) * 100), 1),
+            "p10_p90_coverage_uncalibrated_pct":
+                round(float(np.mean((y >= p10_raw) & (y <= p90_raw)) * 100), 1),
+            "coverage_target_pct": round(TARGET_COVERAGE * 100, 1),
+            "conformal_widening_eur_mwh": round(self.conformal_q, 2),
+            "mean_band_width_eur_mwh": round(float(np.mean(p90 - p10)), 2),
+            "calibration_hours": int(n_cal),
+            "calibration_raw_coverage_pct": round(raw_cal_cov, 1),
             "test_hours": int(len(test_df)),
         }
         best_naive = min(metrics["wape_naive_weekly"], metrics["wape_naive_daily"])
@@ -192,6 +249,15 @@ class PriceForecaster:
             "backtest": metrics,
             "beats_naive_baseline": bool(beats),
             "skill_vs_best_naive_pct": lift,
+            "calibration": {
+                "method": "Conformalized Quantile Regression (split conformal)",
+                "target_coverage_pct": round(TARGET_COVERAGE * 100, 1),
+                "conformal_q_eur_mwh": round(self.conformal_q, 3),
+                "calibration_window": [str(cal_df.index[0]), str(cal_df.index[-1])],
+                "note": "p10/p90 are widened by conformal_q, learned on a held-out "
+                        "calibration slice. Raw GBM quantiles are too narrow on "
+                        "fat-tailed price data; this restores nominal coverage.",
+            },
             "known_weaknesses": [
                 "Carbon (EUA) not yet modelled; gas active only if a TTF feed is configured",
                 "Scarcity spikes and negative-price hours are systematically under-predicted",
@@ -218,6 +284,8 @@ class PriceForecaster:
             if os.path.exists(self._card_path()):
                 with open(self._card_path()) as f:
                     self.model_card = json.load(f)
+                self.conformal_q = float(
+                    self.model_card.get("calibration", {}).get("conformal_q_eur_mwh", 0.0))
             return True
         except Exception:
             return False
@@ -244,6 +312,12 @@ class PriceForecaster:
         df["price_roll_24h_mean"] = float(price_hist.tail(24).mean())
         df["price_roll_168h_mean"] = float(price_hist.tail(168).mean())
         df["price_roll_24h_std"] = float(price_hist.tail(24).std() or 0.0)
+        # volatility block — computed from history that is known at issue time
+        df["price_roll_168h_std"] = float(price_hist.tail(168).std() or 0.0)
+        recent = price_hist.tail(24 * 28)
+        by_hour = recent.groupby(recent.index.hour).std()
+        df["price_hour_std_28d"] = [float(by_hour.get(ts.hour) or 0.0) for ts in idx]
+        df["price_range_24h"] = float(price_hist.tail(24).max() - price_hist.tail(24).min())
         # forward gas: hold the last known settlement flat across the horizon
         # same construction as training: spark spread off the known price lag
         known = pd.Series(df["price_lag_24h"].values, index=idx)
@@ -256,6 +330,9 @@ class PriceForecaster:
         out = pd.DataFrame(index=X.index)
         for q in QUANTILES:
             out[q] = self.boosters[q].predict(X[PRICE_FEATURES])
+        # conformal widening — the same correction validated in the backtest
+        out["p10"] = out["p10"] - self.conformal_q
+        out["p90"] = out["p90"] + self.conformal_q
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])
         return out

@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..db.models import (DataQualityEvent, EicCode, FlowPhysical, LoadActual,
                          Outage, PriceDayAhead, Webhook, get_db)
-from ..utils.eic import IT_BORDERS, ITALY_ZONES, ZONE_SHORT
+from ..utils.eic import (EU_BORDERS, EU_MARKETS, IT_BORDERS, ITALY_ZONES,
+                         ZONE_SHORT)
 from ..utils.timeutils import iso
 from .deps import require_api_key
 
@@ -117,10 +118,27 @@ def dashboard_italy(db: Session = Depends(get_db)):
     latest_per_border: dict[tuple, FlowPhysical] = {}
     for r in flow_rows:
         latest_per_border[(r.from_area_eic, r.to_area_eic)] = r  # last wins (sorted)
-    border_labels = {(f, t): lbl for f, t, lbl in IT_BORDERS}
-    flow_now = [{"border": border_labels.get(k, f"{k[0]}→{k[1]}"),
-                 "mw": round(r.mw, 0), "ts_utc": iso(r.ts_utc)}
-                for k, r in latest_per_border.items()]
+
+    # Label EVERY border we know about, not just the Italian ones — once other
+    # EU markets are backfilled their flows land in the same table and would
+    # otherwise render as raw EIC codes.
+    border_labels: dict[tuple, str] = {}
+    for _cc, _bl in EU_BORDERS.items():
+        for f, t, lbl in _bl:
+            border_labels[(f, t)] = lbl
+
+    def _lbl(k):
+        return border_labels.get(k) or (f"{ZONE_SHORT.get(k[0], k[0])} → "
+                                        f"{ZONE_SHORT.get(k[1], k[1])}")
+
+    it_keys = {(f, t) for f, t, _ in IT_BORDERS}
+    # flows_now = Italian borders only (this is Italy Power Watch; the bar
+    # chart must not fill up with DE→NL). flows_eu = everything, for the map.
+    flow_now = [{"border": _lbl(k), "mw": round(r.mw, 0), "ts_utc": iso(r.ts_utc)}
+                for k, r in latest_per_border.items() if k in it_keys]
+    flow_eu = [{"border": _lbl(k), "from": k[0], "to": k[1],
+                "mw": round(r.mw, 0), "ts_utc": iso(r.ts_utc)}
+               for k, r in latest_per_border.items()]
 
     # only outages that are ongoing or ended within the last 3 days
     outage_rows = db.execute(select(Outage)
@@ -132,7 +150,33 @@ def dashboard_italy(db: Session = Depends(get_db)):
                 "fuel": r.fuel, "start": iso(r.start_utc), "end": iso(r.end_utc),
                 "reason": r.reason} for r in outage_rows]
 
+    # ---- other EU markets (populated by scripts/backfill_eu.py) ----
+    # Latest known day-ahead price per market so the EU map can colour them.
+    markets: dict[str, dict] = {}
+    for cc, m in EU_MARKETS.items():
+        if cc == "IT":
+            continue
+        zone = m["zones"][0]
+        row = db.execute(select(PriceDayAhead)
+                         .where(PriceDayAhead.area_eic == zone,
+                                PriceDayAhead.ts_utc <= now + timedelta(hours=36))
+                         .order_by(PriceDayAhead.ts_utc.desc())
+                         .limit(1)).scalar_one_or_none()
+        ld = db.execute(select(LoadActual)
+                        .where(LoadActual.area_eic == m["national"])
+                        .order_by(LoadActual.ts_utc.desc())
+                        .limit(1)).scalar_one_or_none()
+        if row or ld:
+            markets[cc] = {
+                "name": m["name"], "zone": zone,
+                "price": round(row.price_eur_mwh, 2) if row else None,
+                "price_ts_utc": iso(row.ts_utc) if row else None,
+                "load_mw": round(ld.load_mw, 0) if ld else None,
+                "currency": m["currency"],
+            }
+
     return {"generated_at_utc": iso(datetime.now(timezone.utc)),
             "demo_mode": get_settings().demo_mode,
             "prices": price_series, "load": load_series,
-            "flows_now": flow_now, "outages": outages}
+            "flows_now": flow_now, "flows_eu": flow_eu,
+            "markets": markets, "outages": outages}
