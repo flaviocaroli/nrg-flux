@@ -8,9 +8,15 @@ async function get(path) {
 
 export const api = {
   dashboard: () => get('/v1/dashboard/italy'),
-  forecast: (h = 168) => get(`/v1/forecast/load?horizon=${h}`),
-  priceForecast: (h = 48) => get(`/v1/forecast/price?horizon=${h}`),
-  explain: () => get('/v1/forecast/explain'),
+  markets: () => get('/v1/markets'),
+  forecast: (h = 168, area) =>
+    get(`/v1/forecast/load?horizon=${h}${area ? `&area=${encodeURIComponent(area)}` : ''}`),
+  priceForecast: (h = 48, area) =>
+    get(`/v1/forecast/price?horizon=${h}${area ? `&area=${encodeURIComponent(area)}` : ''}`),
+  explain: (area) => get(`/v1/forecast/explain${area ? `?area=${encodeURIComponent(area)}` : ''}`),
+  loadActual: (area, hours = 96) =>
+    get(`/v1/load/actual?area=${encodeURIComponent(area)}`),
+  pricesFor: (area) => get(`/v1/prices/dayahead?area=${encodeURIComponent(area)}`),
   tsoForecast: () => get('/v1/load/forecast/tso?area=10YIT-GRTN-----B'),
   status: () => get('/v1/status'),
 }

@@ -180,3 +180,48 @@ def dashboard_italy(db: Session = Depends(get_db)):
             "prices": price_series, "load": load_series,
             "flows_now": flow_now, "flows_eu": flow_eu,
             "markets": markets, "outages": outages}
+
+
+@router.get("/markets")
+def markets_catalog(db: Session = Depends(get_db)):
+    """What can the UI actually show?
+
+    Lists every EU market we know about, whether it has data backfilled, and
+    whether a load / price model has been trained and issued for it. The
+    frontend uses this to build its market selector instead of hard-coding
+    Italy.
+    """
+    import os
+
+    from ..db.models import ForecastLoad, ForecastPrice
+    from ..utils.eic import EU_MARKETS, ZONE_SHORT
+
+    s = get_settings()
+    out = []
+    for cc, m in EU_MARKETS.items():
+        nat, zones = m["national"], m["zones"]
+        load_rows = db.execute(select(func.count()).select_from(LoadActual)
+                               .where(LoadActual.area_eic == nat)).scalar_one()
+        price_rows = db.execute(select(func.count()).select_from(PriceDayAhead)
+                                .where(PriceDayAhead.area_eic.in_(zones))).scalar_one()
+        has_load_fc = db.execute(select(func.count()).select_from(ForecastLoad)
+                                 .where(ForecastLoad.area_eic == nat)).scalar_one() > 0
+        has_price_fc = db.execute(select(func.count()).select_from(ForecastPrice)
+                                  .where(ForecastPrice.area_eic.in_(zones))).scalar_one() > 0
+        card = os.path.join(s.model_dir, f"model_card_{nat}.json")
+        pcard = os.path.join(s.model_dir, f"model_card_price_{zones[0]}.json")
+        out.append({
+            "country": cc, "name": m["name"], "currency": m["currency"],
+            "national_eic": nat,
+            "zones": [{"eic": z, "label": ZONE_SHORT.get(z, z)} for z in zones],
+            "load_rows": load_rows, "price_rows": price_rows,
+            "has_load_forecast": has_load_fc,
+            "has_price_forecast": has_price_fc,
+            "load_model_trained": os.path.exists(card),
+            "price_model_trained": os.path.exists(pcard),
+            "ready": bool(load_rows and price_rows),
+        })
+    out.sort(key=lambda r: (not r["ready"], r["country"] != "IT", r["country"]))
+    return {"markets": out,
+            "hint": "Backfill a market with scripts/backfill_eu.py --markets XX, "
+                    "then train with scripts/train_forecast.py --area <national_eic>"}

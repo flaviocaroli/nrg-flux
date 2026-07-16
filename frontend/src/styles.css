@@ -254,3 +254,29 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
 .eu-map .eu-flow { stroke-dasharray: 6 5; animation: euflow 1.4s linear infinite; }
 @keyframes euflow { to { stroke-dashoffset: -11; } }
 @media (prefers-reduced-motion: reduce) { .eu-map .eu-flow { animation: none; } }
+
+/* ---------------- market selector ---------------- */
+.market-bar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
+.market-label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--slate-dim); margin-right: 4px;
+}
+.market-chip {
+  background: var(--panel); border: 1px solid var(--hairline); color: var(--slate);
+  border-radius: 6px; padding: 5px 11px; font-family: var(--font-mono);
+  font-size: 11.5px; cursor: pointer; transition: all .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.market-chip:hover:not(:disabled) { border-color: var(--teal); color: var(--teal); }
+.market-chip.on { background: var(--panel-raised); border-color: var(--teal); color: var(--teal); }
+.market-chip.off { opacity: .35; cursor: not-allowed; border-style: dashed; }
+.market-chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+.market-meta { font-family: var(--font-mono); font-size: 11px; color: var(--slate-dim); margin-left: 8px; }
+.empty-note {
+  padding: 56px 14px; text-align: center; font-family: var(--font-mono);
+  font-size: 12.5px; color: var(--slate); line-height: 2;
+}
+.empty-note code {
+  background: var(--panel-raised); color: var(--amber); padding: 3px 8px;
+  border-radius: 4px; font-size: 11px;
+}

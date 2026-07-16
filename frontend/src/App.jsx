@@ -5,6 +5,7 @@ import ZoneSchematic from './components/ZoneSchematic'
 import ItalyMap from './components/ItalyMap'
 import EuropeMap from './components/EuropeMap'
 import DataCatalog from './components/DataCatalog'
+import MarketPanels from './components/MarketPanels'
 
 const fmtHour = (iso) =>
   new Date(iso).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })
@@ -305,6 +306,10 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <div className="section-rule"><span>All markets · load &amp; price forecasts</span></div>
+
+      <MarketPanels />
 
       <div className="section-rule"><span>What you can download</span></div>
 
