@@ -23,8 +23,25 @@ const VB_W = Math.round((27 - LON_MIN) * K * COS_MID)
 const VB_H = Math.round((LAT_MAX - LAT_MIN) * K)
 
 const px = ([lat, lon]) => [(lon - LON_MIN) * K * COS_MID, (LAT_MAX - lat) * K]
-const toPath = (co) =>
-  'M' + co.map((c) => px(c).map((n) => n.toFixed(1)).join(',')).join(' L') + ' Z'
+// Catmull-Rom -> cubic Bezier: rounds the simplified outlines so coastlines
+// read as coastlines rather than polygons, without adding vertices.
+const toPath = (co, tension = 0.5) => {
+  const p = co.map(px)
+  const n = p.length
+  if (n < 3) return 'M' + p.map((q) => q.join(',')).join(' L') + ' Z'
+  const at = (i) => p[(i + n) % n]
+  let d = `M${at(0)[0].toFixed(1)},${at(0)[1].toFixed(1)}`
+  for (let i = 0; i < n; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2)
+    const c1 = [p1[0] + ((p2[0] - p0[0]) / 6) * tension,
+                p1[1] + ((p2[1] - p0[1]) / 6) * tension]
+    const c2 = [p2[0] - ((p3[0] - p1[0]) / 6) * tension,
+                p2[1] - ((p3[1] - p1[1]) / 6) * tension]
+    d += ` C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ` +
+         `${p2[0].toFixed(1)},${p2[1].toFixed(1)}`
+  }
+  return d + ' Z'
+}
 const centroid = (co) => {
   const p = co.map(px)
   return [p.reduce((a, q) => a + q[0], 0) / p.length,

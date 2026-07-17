@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     noaa_gfs_bucket: str = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
     noaa_api_token: str = ""
 
+    # Copernicus CDS (ERA5 reanalysis) — free registration, format "<uid>:<key>"
+    # https://cds.climate.copernicus.eu  (accept the ERA5 licence too)
+    cds_api_key: str = ""
+
     # NESO (GB National Energy System Operator) Data Portal — CKAN API.
     # Most open datasets need no key; a key raises rate limits / enables
     # authenticated endpoints. https://www.neso.energy/data-portal

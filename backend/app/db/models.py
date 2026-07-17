@@ -159,6 +159,21 @@ class RawDocument(Base):
     parser_version: Mapped[str] = mapped_column(String(16), default="1.0.0")
 
 
+class WeatherHistory(Base):
+    """Hourly observed/reanalysis temperature per area (ERA5).
+
+    This is the input the load model needs to learn weather sensitivity.
+    Forecast weather (MET Norway) is a different thing and is not stored here.
+    """
+    __tablename__ = "weather_history"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    area_eic: Mapped[str] = mapped_column(String(24), index=True)
+    ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    temp_c: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), default="era5")
+    __table_args__ = (Index("ix_wx_area_ts", "area_eic", "ts_utc", unique=True),)
+
+
 class FuelPrice(Base):
     """Daily fuel/carbon settlements (TTF gas, EUA carbon).
 

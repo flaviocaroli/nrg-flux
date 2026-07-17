@@ -59,8 +59,8 @@ def main():
     print(f"  model MAPE : {m['mape_model']}%   RMSE: {m['rmse_model']} MW")
     cov, raw = m['p10_p90_coverage_pct'], m.get('p10_p90_coverage_uncalibrated_pct')
     print(f"  p10-p90 coverage: {cov}%  (target {m.get('coverage_target_pct', 80)}%)")
-    print(f"    uncalibrated  : {raw}%  -> conformal widening "
-          f"+/-{m.get('conformal_widening_mw')} MW")
+    print(f"    uncalibrated  : {raw}%  -> normalized CQR scale "
+          f"x{m.get('conformal_scale')}  (mean band {m.get('mean_band_width_mw')} MW)")
     print(f"  beats naive baseline: {result.model_card['beats_naive_baseline']}")
     print(f"  model card: {s.model_dir}/model_card_{area}.json")
 

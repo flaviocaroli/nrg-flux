@@ -151,7 +151,8 @@ class PriceForecaster:
         self.area_eic = area_eic
         self.boosters: dict[str, lgb.Booster] = {}
         self.model_card: dict = {}
-        self.conformal_q: float = 0.0     # CQR widening, learned at train time
+        self.conformal_q: float = 0.0       # additive widening (reporting)
+        self.conformal_scale: float = 0.0   # normalized CQR factor
 
     def _path(self, q: str) -> str:
         return os.path.join(self.model_dir, f"lgbm_price_{self.area_eic}_{q}.txt")
@@ -180,7 +181,15 @@ class PriceForecaster:
         # capped at 2 weeks and floored at 72h, but never more than 40% —
         # with short histories a fixed 2-week window can leave nothing to fit.
         n_tv = len(trainval)
-        cal_n = int(min(max(n_tv * 0.20, 72), 24 * 14, n_tv * 0.40))
+        # Calibration slice: 20% of the remaining history, floored at 2 weeks and
+        # capped at 35%. NO fixed day-cap — conformal coverage depends on the
+        # calibration set being distributionally close to the test window, and
+        # a 2-week slice of a 2-year series is neither large nor representative.
+        # Calibration size drives the coverage guarantee: too small a slice and
+        # the scale factor is fit on an unrepresentative window. Take 15% of the
+        # available history (floor 2 weeks, ceiling 30%) — with 2 years of data
+        # that is ~100 days rather than a hard-capped 14.
+        cal_n = int(min(max(n_tv * 0.15, 24 * 14), n_tv * 0.30))
         if n_tv - cal_n < 24 * 7:
             raise RuntimeError(
                 f"not enough price history to fit AND calibrate "
@@ -199,10 +208,15 @@ class PriceForecaster:
         # conformity score: how far outside the band did reality land?
         # (negative when inside, so the quantile below also tightens a band
         #  that happens to be too wide)
-        scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
-        n_cal = len(scores)
+        # normalized CQR — multiplicative, so the band scales with how
+        # uncertain the model already is (peak hours vs 3am, calm vs spiky)
+        width_cal = np.maximum(hi_cal - lo_cal, 1e-6)
+        raw_scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
+        norm_scores = raw_scores / width_cal
+        n_cal = len(norm_scores)
         level = min(np.ceil((n_cal + 1) * TARGET_COVERAGE) / n_cal, 1.0)
-        self.conformal_q = float(np.quantile(scores, level, method="higher"))
+        self.conformal_scale = float(np.quantile(norm_scores, level, method="higher"))
+        self.conformal_q = float(np.quantile(raw_scores, level, method="higher"))
         raw_cal_cov = float(np.mean((y_cal >= lo_cal) & (y_cal <= hi_cal)) * 100)
 
         y = test_df["y"].to_numpy()
@@ -210,8 +224,9 @@ class PriceForecaster:
         p10_raw = self.boosters["p10"].predict(test_df[PRICE_FEATURES])
         p90_raw = self.boosters["p90"].predict(test_df[PRICE_FEATURES])
         # apply the correction learned on the calibration slice
-        p10 = p10_raw - self.conformal_q
-        p90 = p90_raw + self.conformal_q
+        width_test = np.maximum(p90_raw - p10_raw, 1e-6)
+        p10 = p10_raw - self.conformal_scale * width_test
+        p90 = p90_raw + self.conformal_scale * width_test
         naive = test_df["price_lag_168h"].to_numpy()      # last week, same hour
         naive_d1 = test_df["price_lag_24h"].to_numpy()    # yesterday, same hour
 
@@ -227,6 +242,7 @@ class PriceForecaster:
                 round(float(np.mean((y >= p10_raw) & (y <= p90_raw)) * 100), 1),
             "coverage_target_pct": round(TARGET_COVERAGE * 100, 1),
             "conformal_widening_eur_mwh": round(self.conformal_q, 2),
+            "conformal_scale": round(self.conformal_scale, 3),
             "mean_band_width_eur_mwh": round(float(np.mean(p90 - p10)), 2),
             "calibration_hours": int(n_cal),
             "calibration_raw_coverage_pct": round(raw_cal_cov, 1),
@@ -253,6 +269,8 @@ class PriceForecaster:
                 "method": "Conformalized Quantile Regression (split conformal)",
                 "target_coverage_pct": round(TARGET_COVERAGE * 100, 1),
                 "conformal_q_eur_mwh": round(self.conformal_q, 3),
+                "conformal_scale": round(self.conformal_scale, 4),
+                "mode": "normalized (multiplicative)",
                 "calibration_window": [str(cal_df.index[0]), str(cal_df.index[-1])],
                 "note": "p10/p90 are widened by conformal_q, learned on a held-out "
                         "calibration slice. Raw GBM quantiles are too narrow on "
@@ -284,8 +302,9 @@ class PriceForecaster:
             if os.path.exists(self._card_path()):
                 with open(self._card_path()) as f:
                     self.model_card = json.load(f)
-                self.conformal_q = float(
-                    self.model_card.get("calibration", {}).get("conformal_q_eur_mwh", 0.0))
+                cal = self.model_card.get("calibration", {})
+                self.conformal_q = float(cal.get("conformal_q_eur_mwh", 0.0))
+                self.conformal_scale = float(cal.get("conformal_scale", 0.0))
             return True
         except Exception:
             return False
@@ -330,9 +349,10 @@ class PriceForecaster:
         out = pd.DataFrame(index=X.index)
         for q in QUANTILES:
             out[q] = self.boosters[q].predict(X[PRICE_FEATURES])
-        # conformal widening — the same correction validated in the backtest
-        out["p10"] = out["p10"] - self.conformal_q
-        out["p90"] = out["p90"] + self.conformal_q
+        # normalized conformal widening, validated in the backtest
+        width = np.maximum(out["p90"] - out["p10"], 1e-6)
+        out["p10"] = out["p10"] - self.conformal_scale * width
+        out["p90"] = out["p90"] + self.conformal_scale * width
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])
         return out

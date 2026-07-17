@@ -54,7 +54,8 @@ class LoadForecaster:
         self.area_eic = area_eic
         self.boosters: dict[str, lgb.Booster] = {}
         self.model_card: dict = {}
-        self.conformal_q: float = 0.0     # CQR widening (MW), learned at train
+        self.conformal_q: float = 0.0       # additive CQR widening (MW), reporting
+        self.conformal_scale: float = 0.0   # normalized CQR factor (dimensionless)
 
     # ------------------------------------------------------------- training
 
@@ -74,7 +75,15 @@ class LoadForecaster:
         # p10-p90 band can be corrected to its nominal coverage instead of
         # being systematically too narrow (raw GBM quantiles under-cover).
         n_tv = len(trainval)
-        cal_n = int(min(max(n_tv * 0.20, 72), 24 * 14, n_tv * 0.40))
+        # Calibration slice: 20% of the remaining history, floored at 2 weeks and
+        # capped at 35%. NO fixed day-cap — conformal coverage depends on the
+        # calibration set being distributionally close to the test window, and
+        # a 2-week slice of a 2-year series is neither large nor representative.
+        # Calibration size drives the coverage guarantee: too small a slice and
+        # the scale factor is fit on an unrepresentative window. Take 15% of the
+        # available history (floor 2 weeks, ceiling 30%) — with 2 years of data
+        # that is ~100 days rather than a hard-capped 14.
+        cal_n = int(min(max(n_tv * 0.15, 24 * 14), n_tv * 0.30))
         train_df, cal_df = trainval.iloc[:-cal_n], trainval.iloc[-cal_n:]
 
         for name, alpha in QUANTILES.items():
@@ -85,17 +94,28 @@ class LoadForecaster:
         y_cal = cal_df["y"].to_numpy()
         lo_cal = self.boosters["p10"].predict(cal_df[FEATURES])
         hi_cal = self.boosters["p90"].predict(cal_df[FEATURES])
-        scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
-        level = min(np.ceil((len(scores) + 1) * TARGET_COVERAGE) / len(scores), 1.0)
-        self.conformal_q = float(np.quantile(scores, level, method="higher"))
+
+        # NORMALIZED CQR: divide the conformity score by the model's own band
+        # width, so the correction is MULTIPLICATIVE. A single additive offset
+        # cannot fit an error that is small at 3am and large at the evening
+        # peak; a scale factor stretches each band in proportion to how
+        # uncertain the model already thinks it is.
+        width_cal = np.maximum(hi_cal - lo_cal, 1e-6)
+        raw_scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
+        norm_scores = raw_scores / width_cal
+        level = min(np.ceil((len(norm_scores) + 1) * TARGET_COVERAGE) / len(norm_scores), 1.0)
+        self.conformal_scale = float(np.quantile(norm_scores, level, method="higher"))
+        # keep the additive value for reporting/back-compat
+        self.conformal_q = float(np.quantile(raw_scores, level, method="higher"))
 
         # --- backtest vs naive previous-week baseline ---
         y = test_df["y"].to_numpy()
         p50 = self.boosters["p50"].predict(test_df[FEATURES])
         p10_raw = self.boosters["p10"].predict(test_df[FEATURES])
         p90_raw = self.boosters["p90"].predict(test_df[FEATURES])
-        p10 = p10_raw - self.conformal_q
-        p90 = p90_raw + self.conformal_q
+        width_test = np.maximum(p90_raw - p10_raw, 1e-6)
+        p10 = p10_raw - self.conformal_scale * width_test
+        p90 = p90_raw + self.conformal_scale * width_test
         naive = test_df["load_lag_168h"].to_numpy()
         coverage = float(np.mean((y >= p10) & (y <= p90)) * 100)
         coverage_raw = float(np.mean((y >= p10_raw) & (y <= p90_raw)) * 100)
@@ -109,6 +129,8 @@ class LoadForecaster:
             "p10_p90_coverage_uncalibrated_pct": round(coverage_raw, 1),
             "coverage_target_pct": round(TARGET_COVERAGE * 100, 1),
             "conformal_widening_mw": round(self.conformal_q, 1),
+            "conformal_scale": round(self.conformal_scale, 3),
+            "mean_band_width_mw": round(float(np.mean(p90 - p10)), 1),
             "test_hours": int(len(test_df)),
         }
         beats_baseline = metrics["wape_model"] < metrics["wape_naive_weekly"]
@@ -126,6 +148,8 @@ class LoadForecaster:
                 "method": "Conformalized Quantile Regression (split conformal)",
                 "target_coverage_pct": round(TARGET_COVERAGE * 100, 1),
                 "conformal_q_mw": round(self.conformal_q, 2),
+                "conformal_scale": round(self.conformal_scale, 4),
+                "mode": "normalized (multiplicative) — scales with local band width",
                 "calibration_hours": int(cal_n),
             },
             "load_range_mw": [round(float(load.min())), round(float(load.max()))],
@@ -157,25 +181,59 @@ class LoadForecaster:
             if os.path.exists(card):
                 with open(card) as f:
                     self.model_card = json.load(f)
-                self.conformal_q = float(
-                    self.model_card.get("calibration", {}).get("conformal_q_mw", 0.0))
+                cal = self.model_card.get("calibration", {})
+                self.conformal_q = float(cal.get("conformal_q_mw", 0.0))
+                self.conformal_scale = float(cal.get("conformal_scale", 0.0))
             return True
         except Exception:
             return False
 
     def predict(self, history: pd.Series, temp_forecast: pd.Series,
-                horizon_hours: int) -> pd.DataFrame:
-        X = build_inference_frame(history, temp_forecast, horizon_hours)
-        out = pd.DataFrame(index=X.index)
-        for name in QUANTILES:
-            out[name] = self.boosters[name].predict(X[FEATURES])
-        # conformal widening, validated in the backtest
-        out["p10"] = out["p10"] - self.conformal_q
-        out["p90"] = out["p90"] + self.conformal_q
+                horizon_hours: int, recursive: bool = True) -> pd.DataFrame:
+        """Multi-step forecast.
+
+        RECURSIVE (default): step hour by hour, appending each p50 prediction
+        back onto the history so the lag/rolling features of the next step see
+        it. Without this, every hour beyond h=24 receives an IDENTICAL feature
+        vector (the lag walk-back lands on the same observation), so the model
+        emits the same 24h shape on repeat — a square wave, not a forecast.
+
+        recursive=False keeps the old one-shot behaviour, which is only valid
+        for horizons <= 24h.
+        """
+        if not recursive or horizon_hours <= 24:
+            X = build_inference_frame(history, temp_forecast, horizon_hours)
+            out = pd.DataFrame(index=X.index)
+            for name in QUANTILES:
+                out[name] = self.boosters[name].predict(X[FEATURES])
+            return self._finish(out)
+
+        hist = history.copy()
+        idx, p10s, p50s, p90s = [], [], [], []
+        for _ in range(horizon_hours):
+            X = build_inference_frame(hist, temp_forecast, 1)
+            ts = X.index[0]
+            row = X[FEATURES]
+            p50 = float(self.boosters["p50"].predict(row)[0])
+            p10s.append(float(self.boosters["p10"].predict(row)[0]))
+            p90s.append(float(self.boosters["p90"].predict(row)[0]))
+            p50s.append(p50)
+            idx.append(ts)
+            # feed the central estimate back in — this is what makes step h+1
+            # aware of step h
+            hist = pd.concat([hist, pd.Series([p50], index=[ts])])
+        out = pd.DataFrame({"p10": p10s, "p50": p50s, "p90": p90s},
+                           index=pd.DatetimeIndex(idx, tz="UTC"))
+        return self._finish(out)
+
+    def _finish(self, out: pd.DataFrame) -> pd.DataFrame:
+        # normalized conformal widening, validated in the backtest
+        width = np.maximum(out["p90"] - out["p10"], 1e-6)
+        out["p10"] = out["p10"] - self.conformal_scale * width
+        out["p90"] = out["p90"] + self.conformal_scale * width
         # enforce monotone quantiles
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])
-        out["_X"] = list(X[FEATURES].itertuples(index=False, name=None))
         return out
 
     def explain(self, history: pd.Series, temp_forecast: pd.Series,

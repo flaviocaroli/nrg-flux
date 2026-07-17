@@ -153,10 +153,16 @@ export default function MarketPanels() {
             {cov(data.loadFc)}
             {badge(data.loadFc)}
           </h2>
+          {!data.loadFc && (
+            <div className="train-hint">
+              No model trained for {market?.name} — showing actual load only.<br />
+              <code>python3 scripts/train_forecast.py --area {market?.national_eic}</code>
+            </div>
+          )}
           {loadOption ? <Chart option={loadOption} /> : (
             <div className="empty-note">
-              No load forecast for {market?.name}.<br />
-              <code>python scripts/train_forecast.py --area {market?.national_eic}</code>
+              No load data for {market?.name}.<br />
+              <code>python3 scripts/backfill_eu.py --markets {market?.country}</code>
             </div>
           )}
         </div>
@@ -166,10 +172,16 @@ export default function MarketPanels() {
             {cov(data.priceFc)}
             {badge(data.priceFc)}
           </h2>
+          {!data.priceFc && (
+            <div className="train-hint">
+              No price model for {market?.zones[0].label} — showing actual prices only.<br />
+              <code>python3 scripts/train_price_forecast.py --area {market?.zones[0].eic}</code>
+            </div>
+          )}
           {priceOption ? <Chart option={priceOption} /> : (
             <div className="empty-note">
-              No price forecast for {market?.name}.<br />
-              <code>python scripts/train_price_forecast.py --area {market?.zones[0].eic}</code>
+              No price data for {market?.name}.<br />
+              <code>python3 scripts/backfill_eu.py --markets {market?.country}</code>
             </div>
           )}
         </div>

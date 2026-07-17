@@ -93,8 +93,8 @@ def main():
     cov, raw = m['p10_p90_coverage_pct'], m.get('p10_p90_coverage_uncalibrated_pct')
     flag = "OK" if abs(cov - tgt) <= 7 else "CHECK"
     print(f"  p10-p90 coverage: {cov}%  (target {tgt}%)  [{flag}]")
-    print(f"    uncalibrated  : {raw}%   -> conformal widening "
-          f"+/-{m.get('conformal_widening_eur_mwh')} EUR/MWh")
+    print(f"    uncalibrated  : {raw}%   -> normalized CQR scale "
+          f"x{m.get('conformal_scale')}")
     print(f"    mean band width: {m.get('mean_band_width_eur_mwh')} EUR/MWh "
           f"(calibrated on {m.get('calibration_hours')} h)")
     print(f"  beats naive     : {res.model_card['beats_naive_baseline']}"

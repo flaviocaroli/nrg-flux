@@ -36,6 +36,24 @@ log = logging.getLogger("nrgflux.history")
 MIN_TRAIN_DAYS = 45          # below this, a GBM on hourly load is unreliable
 
 
+def stored_weather(area: str) -> pd.Series:
+    """Observed temperature history from the DB (ERA5), empty if none."""
+    from ..db.models import WeatherHistory
+    db = SessionLocal()
+    try:
+        rows = db.execute(select(WeatherHistory)
+                          .where(WeatherHistory.area_eic == area)
+                          .order_by(WeatherHistory.ts_utc)).scalars().all()
+    finally:
+        db.close()
+    if not rows:
+        return pd.Series(dtype=float)
+    idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
+                            if r.ts_utc.tzinfo is None else r.ts_utc
+                            for r in rows], tz="UTC")
+    return pd.Series([r.temp_c for r in rows], index=idx).sort_index()
+
+
 def load_history(area: str, days: int = 730) -> pd.Series:
     """Hourly actual load (MW) for an area, straight from the DB."""
     db = SessionLocal()
@@ -87,6 +105,20 @@ def temperature_history(idx: pd.DatetimeIndex, area: str = "") -> pd.Series:
         from ..demo.synthetic import temperature_at
         return pd.Series([temperature_at(t.to_pydatetime()) for t in idx], index=idx)
 
+    # 1) real ERA5 history if we have it — this is what makes the model work
+    real = stored_weather(area)
+    if not real.empty:
+        cov = real.reindex(idx).notna().mean()
+        if cov > 0.9:
+            log.info("using ERA5 weather history (%.0f%% coverage)", cov * 100)
+            return real.reindex(idx).interpolate(limit=6).ffill().bfill()
+        log.warning("ERA5 covers only %.0f%% of the training window — "
+                    "backfill more years", cov * 100)
+
+    # 2) fallback: climatology proxy. Documented, but roughly doubles the error.
+    log.warning("No ERA5 weather history for %s — falling back to a climatology "
+                "proxy. Expect ~2x error; the model may not beat naive. "
+                "Fix with: python scripts/backfill_era5.py --area %s", area, area)
     from ..utils.eic import ZONE_CENTROIDS
     lat = ZONE_CENTROIDS.get(area, (43.0, 12.0))[0]
     # amplitude of the annual swing grows with latitude; phase peaks late July
