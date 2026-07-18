@@ -147,13 +147,36 @@ def test_weather_history_endpoint(client):
 
 
 def test_weather_history_uses_de_control_area(client):
-    # Germany's trap: weather is keyed to the control area (…A83F), so the
-    # DE-LU bidding zone (…A82H) must NOT carry weather rows.
-    ctrl = client.get("/v1/weather/history", params={"area": "10Y1001A1001A83F"})
-    zone = client.get("/v1/weather/history", params={"area": "10Y1001A1001A82H"})
-    assert ctrl.status_code == 200 and zone.status_code == 200
-    assert ctrl.json()["count"] > 0
-    assert zone.json()["count"] == 0
+    # Germany's trap: weather is keyed to the control area (…A83F). The DE-LU
+    # bidding zone (…A82H) must NEVER carry weather rows. Self-seed one control
+    # -area row so this holds on CI's empty DB as well as a backfilled one,
+    # then clean it up.
+    from datetime import timedelta
+
+    from app.db.models import SessionLocal, WeatherHistory, init_db
+    init_db()
+    ctrl_eic, zone_eic = "10Y1001A1001A83F", "10Y1001A1001A82H"
+    ts = datetime.now(timezone.utc) - timedelta(days=1)
+    db = SessionLocal()
+    seeded = False
+    if db.query(WeatherHistory).filter_by(area_eic=ctrl_eic, ts_utc=ts).first() is None:
+        db.add(WeatherHistory(area_eic=ctrl_eic, ts_utc=ts, temp_c=18.0, source="test"))
+        db.commit()
+        seeded = True
+    db.close()
+    try:
+        ctrl = client.get("/v1/weather/history", params={"area": ctrl_eic})
+        zone = client.get("/v1/weather/history", params={"area": zone_eic})
+        assert ctrl.status_code == 200 and zone.status_code == 200
+        assert ctrl.json()["count"] > 0        # weather lives under the control area
+        assert zone.json()["count"] == 0       # never under the DE-LU price zone
+    finally:
+        if seeded:
+            db = SessionLocal()
+            db.query(WeatherHistory).filter_by(
+                area_eic=ctrl_eic, ts_utc=ts, source="test").delete()
+            db.commit()
+            db.close()
 
 
 # ------------------------------------------------------- outage parser
