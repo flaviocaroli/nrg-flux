@@ -55,7 +55,9 @@ class LoadForecaster:
         self.boosters: dict[str, lgb.Booster] = {}
         self.model_card: dict = {}
         self.conformal_q: float = 0.0       # additive CQR widening (MW), reporting
-        self.conformal_scale: float = 0.0   # normalized CQR factor (dimensionless)
+        self.conformal_scale: float = 0.0   # legacy symmetric factor (back-compat)
+        self.scale_lo: float = 0.0          # asymmetric CQR: lower-edge factor
+        self.scale_hi: float = 0.0          # asymmetric CQR: upper-edge factor
 
     # ------------------------------------------------------------- training
 
@@ -75,15 +77,13 @@ class LoadForecaster:
         # p10-p90 band can be corrected to its nominal coverage instead of
         # being systematically too narrow (raw GBM quantiles under-cover).
         n_tv = len(trainval)
-        # Calibration slice: 20% of the remaining history, floored at 2 weeks and
-        # capped at 35%. NO fixed day-cap — conformal coverage depends on the
-        # calibration set being distributionally close to the test window, and
-        # a 2-week slice of a 2-year series is neither large nor representative.
-        # Calibration size drives the coverage guarantee: too small a slice and
-        # the scale factor is fit on an unrepresentative window. Take 15% of the
-        # available history (floor 2 weeks, ceiling 30%) — with 2 years of data
-        # that is ~100 days rather than a hard-capped 14.
-        cal_n = int(min(max(n_tv * 0.15, 24 * 14), n_tv * 0.30))
+        # v6 ROLLING slice: the most recent NRGFLUX_CAL_DAYS (default 45) of
+        # the fit history. Conformal factors are only guaranteed to transfer
+        # when the calibration slice looks like tomorrow — a recent window
+        # does, a 100-day archaeology of old regimes does not. The daily
+        # retrain makes this a *rolling* recalibration for free.
+        from .calibration import rolling_cal_hours
+        cal_n = rolling_cal_hours(n_tv)
         train_df, cal_df = trainval.iloc[:-cal_n], trainval.iloc[-cal_n:]
 
         for name, alpha in QUANTILES.items():
@@ -95,17 +95,16 @@ class LoadForecaster:
         lo_cal = self.boosters["p10"].predict(cal_df[FEATURES])
         hi_cal = self.boosters["p90"].predict(cal_df[FEATURES])
 
-        # NORMALIZED CQR: divide the conformity score by the model's own band
-        # width, so the correction is MULTIPLICATIVE. A single additive offset
-        # cannot fit an error that is small at 3am and large at the evening
-        # peak; a scale factor stretches each band in proportion to how
-        # uncertain the model already thinks it is.
-        width_cal = np.maximum(hi_cal - lo_cal, 1e-6)
+        # NORMALIZED + ASYMMETRIC CQR (v6): each band edge gets its own
+        # multiplicative factor, calibrated on its own tail with half the miss
+        # budget. Load errors are mildly asymmetric (under-forecast on heat
+        # ramps); prices far more so — the shared module serves both.
+        from .calibration import asymmetric_cqr
+        scales = asymmetric_cqr(y_cal, lo_cal, hi_cal, TARGET_COVERAGE)
+        self.scale_lo, self.scale_hi = scales.lo, scales.hi
+        self.conformal_scale = scales.symmetric_equivalent  # legacy field
         raw_scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
-        norm_scores = raw_scores / width_cal
-        level = min(np.ceil((len(norm_scores) + 1) * TARGET_COVERAGE) / len(norm_scores), 1.0)
-        self.conformal_scale = float(np.quantile(norm_scores, level, method="higher"))
-        # keep the additive value for reporting/back-compat
+        level = min(np.ceil((len(raw_scores) + 1) * TARGET_COVERAGE) / len(raw_scores), 1.0)
         self.conformal_q = float(np.quantile(raw_scores, level, method="higher"))
 
         # --- backtest vs naive previous-week baseline ---
@@ -113,9 +112,8 @@ class LoadForecaster:
         p50 = self.boosters["p50"].predict(test_df[FEATURES])
         p10_raw = self.boosters["p10"].predict(test_df[FEATURES])
         p90_raw = self.boosters["p90"].predict(test_df[FEATURES])
-        width_test = np.maximum(p90_raw - p10_raw, 1e-6)
-        p10 = p10_raw - self.conformal_scale * width_test
-        p90 = p90_raw + self.conformal_scale * width_test
+        from .calibration import apply_scales
+        p10, p90 = apply_scales(p10_raw, p90_raw, self.scale_lo, self.scale_hi)
         naive = test_df["load_lag_168h"].to_numpy()
         coverage = float(np.mean((y >= p10) & (y <= p90)) * 100)
         coverage_raw = float(np.mean((y >= p10_raw) & (y <= p90_raw)) * 100)
@@ -149,6 +147,9 @@ class LoadForecaster:
                 "target_coverage_pct": round(TARGET_COVERAGE * 100, 1),
                 "conformal_q_mw": round(self.conformal_q, 2),
                 "conformal_scale": round(self.conformal_scale, 4),
+                "conformal_scale_lo": round(self.scale_lo, 4),
+                "conformal_scale_hi": round(self.scale_hi, 4),
+                "mode": "normalized asymmetric CQR, rolling window (v6)",
                 "mode": "normalized (multiplicative) — scales with local band width",
                 "calibration_hours": int(cal_n),
             },
@@ -184,6 +185,11 @@ class LoadForecaster:
                 cal = self.model_card.get("calibration", {})
                 self.conformal_q = float(cal.get("conformal_q_mw", 0.0))
                 self.conformal_scale = float(cal.get("conformal_scale", 0.0))
+                # v6 asymmetric factors; older cards fall back to symmetric
+                self.scale_lo = float(cal.get("conformal_scale_lo",
+                                              self.conformal_scale))
+                self.scale_hi = float(cal.get("conformal_scale_hi",
+                                              self.conformal_scale))
             return True
         except Exception:
             return False
@@ -229,8 +235,8 @@ class LoadForecaster:
     def _finish(self, out: pd.DataFrame) -> pd.DataFrame:
         # normalized conformal widening, validated in the backtest
         width = np.maximum(out["p90"] - out["p10"], 1e-6)
-        out["p10"] = out["p10"] - self.conformal_scale * width
-        out["p90"] = out["p90"] + self.conformal_scale * width
+        out["p10"] = out["p10"] - self.scale_lo * width
+        out["p90"] = out["p90"] + self.scale_hi * width
         # enforce monotone quantiles
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])

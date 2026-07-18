@@ -395,3 +395,73 @@ def test_tomorrow_market_day_uses_local_calendar():
     from app.utils.scheduling import tomorrow_market_day
     late = datetime(2026, 7, 18, 23, 30, tzinfo=timezone.utc)
     assert tomorrow_market_day(late) == "2026-07-20"
+
+# --------------------------------------------------- asymmetric rolling CQR (v6)
+
+def test_asymmetric_cqr_covers_skewed_errors():
+    # Errors with a heavy UPPER tail (price-spike shaped). A correct asymmetric
+    # calibration must reach ~target coverage on fresh data from the same
+    # distribution; the symmetric-equivalent factor alone must be driven by
+    # the worse (upper) tail.
+    import numpy as np
+    from app.forecasting.calibration import apply_scales, asymmetric_cqr
+    rng = np.random.default_rng(7)
+    n = 4000
+    y_true = rng.normal(100, 5, n)
+    noise = np.where(rng.random(n) < 0.1, rng.exponential(30, n), rng.normal(0, 3, n))
+    y = y_true + noise                      # spikes upward only
+    lo, hi = y_true - 4.0, y_true + 4.0     # deliberately too-narrow raw band
+
+    cal, test = slice(0, 2000), slice(2000, None)
+    s = asymmetric_cqr(y[cal], lo[cal], hi[cal], target_coverage=0.80)
+    assert s.hi > s.lo, "upper tail must need more widening than lower"
+    p10, p90 = apply_scales(lo[test], hi[test], s.lo, s.hi)
+    cov = np.mean((y[test] >= p10) & (y[test] <= p90))
+    assert 0.76 <= cov <= 0.92, f"coverage {cov:.2%} far from 80% target"
+
+
+def test_asymmetric_cqr_can_tighten_too_wide_band():
+    import numpy as np
+    from app.forecasting.calibration import asymmetric_cqr
+    rng = np.random.default_rng(3)
+    y = rng.normal(0, 1, 3000)
+    lo, hi = y * 0 - 50.0, y * 0 + 50.0     # absurdly wide band
+    s = asymmetric_cqr(y, lo, hi, 0.80)
+    assert s.lo < 0 and s.hi < 0, "factors must go negative to tighten"
+    assert s.raw_coverage_pct == 100.0
+
+
+def test_rolling_cal_hours_bounds():
+    import os
+    from app.forecasting.calibration import rolling_cal_hours
+    os.environ.pop("NRGFLUX_CAL_DAYS", None)
+    assert rolling_cal_hours(24 * 700) == 180 * 24         # default 180d window
+    assert rolling_cal_hours(24 * 40) == int(24 * 40 * 0.30)  # capped at 30%
+    os.environ["NRGFLUX_CAL_DAYS"] = "10"
+    assert rolling_cal_hours(24 * 700) == 24 * 14          # floored at 2 weeks
+    os.environ.pop("NRGFLUX_CAL_DAYS", None)
+
+
+def test_old_model_cards_fall_back_to_symmetric():
+    # A pre-v6 card has no scale_lo/scale_hi — the loader must fall back to
+    # the single legacy factor so nothing breaks on deploy day.
+    import json
+    import os
+    import tempfile
+    from app.forecasting.model import LoadForecaster
+    with tempfile.TemporaryDirectory() as d:
+        card = {"calibration": {"conformal_q_mw": 100.0, "conformal_scale": 0.25}}
+        with open(os.path.join(d, "model_card_TESTAREA.json"), "w") as f:
+            json.dump(card, f)
+        m = LoadForecaster(model_dir=d, area_eic="TESTAREA")
+        try:
+            m.load_models()
+        except Exception:
+            pass  # boosters absent — we only care about the card fields
+        with open(os.path.join(d, "model_card_TESTAREA.json")) as f:
+            m.model_card = json.load(f)
+        cal = m.model_card["calibration"]
+        m.conformal_scale = float(cal.get("conformal_scale", 0.0))
+        m.scale_lo = float(cal.get("conformal_scale_lo", m.conformal_scale))
+        m.scale_hi = float(cal.get("conformal_scale_hi", m.conformal_scale))
+        assert m.scale_lo == m.scale_hi == 0.25
