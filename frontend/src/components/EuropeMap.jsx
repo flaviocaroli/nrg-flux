@@ -117,7 +117,7 @@ const LINKS = [
 function heat(p, lo, hi) {
   if (p == null || !isFinite(p)) return null
   const t = hi === lo ? 0.5 : Math.max(0, Math.min(1, (p - lo) / (hi - lo)))
-  const stops = [[52, 217, 195], [255, 180, 84], [255, 90, 102]]
+  const stops = [[31, 73, 224], [215, 126, 0], [204, 61, 78]]
   const seg = t < 0.5 ? [stops[0], stops[1]] : [stops[1], stops[2]]
   const k = t < 0.5 ? t * 2 : (t - 0.5) * 2
   const c = seg[0].map((a, i) => Math.round(a + (seg[1][i] - a) * k))
@@ -154,7 +154,7 @@ export default function EuropeMap({ dash, markets = {} }) {
         </defs>
 
         {Object.entries(CONTEXT).map(([k, c]) => (
-          <path key={k} d={toPath(c)} fill="#141d31" stroke={C.hairline}
+          <path key={k} d={toPath(c)} fill="#DFE5ED" stroke={C.hairline}
             strokeWidth="0.6" opacity="0.5" />
         ))}
 
@@ -185,14 +185,14 @@ export default function EuropeMap({ dash, markets = {} }) {
           return (
             <g key={cc} onMouseEnter={() => setHover(cc)} onMouseLeave={() => setHover(null)}
               style={{ cursor: 'pointer' }}>
-              <path d={toPath(cfg.c)} fill={f || '#182543'}
+              <path d={toPath(cfg.c)} fill={f || '#EFF2F6'}
                 fillOpacity={f ? (on ? 0.88 : 0.6) : 0.5}
                 stroke={on ? C.chalk : C.hairline} strokeWidth={on ? 1.6 : 0.9}
                 strokeDasharray={f ? '0' : '3 2.5'} />
-              <text x={cx} y={cy} fill={f ? '#0d1424' : C.slate} fontSize="10"
+              <text x={cx} y={cy} fill={f ? '#FFFFFF' : C.slate} fontSize="10"
                 fontWeight="700" textAnchor="middle" fontFamily="Space Grotesk">{cc}</text>
               {p != null && (
-                <text x={cx} y={cy + 11} fill="#0d1424" fontSize="8.5" textAnchor="middle"
+                <text x={cx} y={cy + 11} fill="#FFFFFF" fontSize="8.5" textAnchor="middle"
                   fontFamily="IBM Plex Mono">{p.toFixed(0)}€</text>
               )}
             </g>
@@ -207,12 +207,12 @@ export default function EuropeMap({ dash, markets = {} }) {
           return (
             <g key={z} onMouseEnter={() => setHover(z)} onMouseLeave={() => setHover(null)}
               style={{ cursor: 'pointer' }}>
-              <path d={toPath(co)} fill={f || '#182543'} fillOpacity={on ? 0.92 : 0.78}
+              <path d={toPath(co)} fill={f || '#EFF2F6'} fillOpacity={on ? 0.92 : 0.78}
                 stroke={on ? C.chalk : C.amber} strokeWidth={on ? 1.6 : 0.9} />
-              <text x={cx} y={cy - 1} fill="#0d1424" fontSize="7.5" fontWeight="700"
+              <text x={cx} y={cy - 1} fill="#FFFFFF" fontSize="7.5" fontWeight="700"
                 textAnchor="middle" fontFamily="Space Grotesk">{z}</text>
               {p != null && (
-                <text x={cx} y={cy + 7.5} fill="#0d1424" fontSize="6.5" textAnchor="middle"
+                <text x={cx} y={cy + 7.5} fill="#FFFFFF" fontSize="6.5" textAnchor="middle"
                   fontFamily="IBM Plex Mono">{p.toFixed(0)}</text>
               )}
             </g>

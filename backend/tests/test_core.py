@@ -356,3 +356,42 @@ def test_eu_markets_reference_known_eics():
             if z not in known:
                 missing.append((cc, z))
     assert not missing, f"markets reference unseeded EICs: {missing}"
+
+# --------------------------------------------------- scheduler time math
+# The scheduler must fire at 13:05 Europe/Rome regardless of DST — these are
+# golden tests in the same spirit as the market-day DST gate above.
+
+def test_next_daily_run_summer_is_1105_utc():
+    from app.utils.scheduling import next_daily_run
+    now = datetime(2026, 7, 18, 8, 0, tzinfo=timezone.utc)  # CEST (UTC+2)
+    assert next_daily_run(now) == datetime(2026, 7, 18, 11, 5, tzinfo=timezone.utc)
+
+
+def test_next_daily_run_winter_is_1205_utc():
+    from app.utils.scheduling import next_daily_run
+    now = datetime(2026, 1, 15, 8, 0, tzinfo=timezone.utc)  # CET (UTC+1)
+    assert next_daily_run(now) == datetime(2026, 1, 15, 12, 5, tzinfo=timezone.utc)
+
+
+def test_next_daily_run_rolls_to_tomorrow_across_dst_end():
+    # 2026-10-24 14:00 local is after 13:05, so next run is Sunday the 25th —
+    # the day clocks fall back. 13:05 CET on the 25th is 12:05 UTC.
+    from app.utils.scheduling import next_daily_run
+    now = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)  # 14:00 CEST
+    assert next_daily_run(now) == datetime(2026, 10, 25, 12, 5, tzinfo=timezone.utc)
+
+
+def test_next_half_hour_boundaries():
+    from app.utils.scheduling import next_half_hour
+    t = datetime(2026, 7, 18, 9, 14, 59, tzinfo=timezone.utc)
+    assert next_half_hour(t) == datetime(2026, 7, 18, 9, 30, tzinfo=timezone.utc)
+    t2 = datetime(2026, 7, 18, 9, 30, 0, tzinfo=timezone.utc)
+    assert next_half_hour(t2) == datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc)
+
+
+def test_tomorrow_market_day_uses_local_calendar():
+    # 23:30 UTC on the 18th is already the 19th in Rome (CEST), so "tomorrow"
+    # for publication purposes is the 20th.
+    from app.utils.scheduling import tomorrow_market_day
+    late = datetime(2026, 7, 18, 23, 30, tzinfo=timezone.utc)
+    assert tomorrow_market_day(late) == "2026-07-20"

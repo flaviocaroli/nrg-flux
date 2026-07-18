@@ -1,0 +1,11 @@
+[Unit]
+Description=Run NRG-Flux retrain daily at 13:05 Europe/Rome (post-publication)
+
+[Timer]
+# timezone-suffixed OnCalendar needs systemd >= 235 (Ubuntu 18.04+); the time
+# tracks CET/CEST automatically, matching the ~12:45 local publication.
+OnCalendar=*-*-* 13:05:00 Europe/Rome
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run NRG-Flux ingestion every 30 minutes
+
+[Timer]
+OnCalendar=*:00/30
+# if the box was off when a slot passed, run once on boot
+Persistent=true
+RandomizedDelaySec=90
+
+[Install]
+WantedBy=timers.target

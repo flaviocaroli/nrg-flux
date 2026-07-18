@@ -76,7 +76,7 @@ export default function App() {
       yAxis: { type: 'value', name: 'MW', nameTextStyle: { color: C.slateDim, fontFamily: 'IBM Plex Mono' }, ...axisBase, scale: true },
       series: [
         { name: 'p10–p90 band', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', data: band.map(([t, lo]) => [t, lo]) },
-        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', areaStyle: { color: 'rgba(52,217,195,0.14)' }, data: band.map(([t, lo, hi]) => [t, hi - lo]) },
+        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', areaStyle: { color: 'rgba(31,73,224,0.10)' }, data: band.map(([t, lo, hi]) => [t, hi - lo]) },
         { name: 'Actual load', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.chalk }, itemStyle: { color: C.chalk }, data: dash.load },
         { name: 'NRG-Flux p50', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.teal }, itemStyle: { color: C.teal }, data: fc.forecast.map((p) => [p.ts_utc, p.mw_p50]) },
         { name: 'TSO day-ahead', type: 'line', showSymbol: false, lineStyle: { width: 1.4, color: C.amber, type: 'dashed' }, itemStyle: { color: C.amber }, data: (tso?.series || []).map((p) => [p.ts_utc, p.value]) },
@@ -127,13 +127,13 @@ export default function App() {
   if (err) return (
     <div className="error">
       <div>
-        Italy Power Watch can't reach the NRG-Flux API.
+        Europe Grid Pulse can't reach the NRG-Flux API.
         <code>{err}</code>
         <code>Start it with: cd backend && uvicorn app.main:app --port 8000</code>
       </div>
     </div>
   )
-  if (!dash || !fc || !kpis) return <div className="loading">syncing with the grid …</div>
+  if (!dash || !fc || !kpis) return <div className="loading">syncing with the European grid …</div>
 
   const tickerItems = Object.entries(dash.prices).map(([z, s]) => {
     const last = s.at(-1)?.[1], prev = s.at(-25)?.[1] ?? last
@@ -145,7 +145,9 @@ export default function App() {
     <div className="shell">
       <header className="masthead">
         <span className="brand">NRG<b>-FLUX</b></span>
-        <h1>Italy Power Watch</h1>
+        <h1>Europe Grid Pulse
+          <small>day-ahead markets · calibrated forecasts · IT · FR · DE · CH</small>
+        </h1>
         <div className="meta">
           <span>{new Date(dash.generated_at_utc).toUTCString().replace('GMT', 'UTC')}</span>
           <span className={`pill ${dash.demo_mode ? 'demo' : ''}`}>
@@ -153,6 +155,16 @@ export default function App() {
           </span>
         </div>
       </header>
+
+      {/* The signature: Europe's grid runs at 50 Hz — so does the masthead. */}
+      <svg className="pulse-rule" viewBox="0 0 1200 22" preserveAspectRatio="none" aria-hidden="true">
+        <line className="base" x1="0" y1="11" x2="1200" y2="11" />
+        <path className="wave" d={Array.from({ length: 30 }, (_, i) =>
+          `${i === 0 ? 'M0 11 ' : ''}Q${i * 40 + 10} ${i % 2 ? 21 : 1} ${i * 40 + 20} 11 T${i * 40 + 40} 11`
+        ).join(' ')} />
+      </svg>
+
+      <div className="section-rule"><span>Italy · reference market</span></div>
 
       <div className="ticker" aria-hidden="true">
         <div className="ticker-track">
@@ -169,22 +181,22 @@ export default function App() {
 
       <section className="kpis">
         <div className="kpi amber">
-          <div className="label">Avg zonal price · latest hour</div>
+          <div className="label">Italy avg zonal price · latest hour</div>
           <div className="value">{kpis.pun.toFixed(2)}<small>€/MWh</small></div>
-          <div className="sub">proxy for PUN across 6 zones</div>
+          <div className="sub">proxy for PUN across 6 Italian zones</div>
         </div>
         <div className="kpi teal">
-          <div className="label">Tomorrow peak load · p50</div>
+          <div className="label">Italy tomorrow peak load · p50</div>
           <div className="value">{(kpis.peak.mw_p50 / 1000).toFixed(1)}<small>GW</small></div>
           <div className="sub">{fmtHour(kpis.peak.ts_utc)} CET · band {(kpis.peak.mw_p10 / 1000).toFixed(1)}–{(kpis.peak.mw_p90 / 1000).toFixed(1)} GW</div>
         </div>
         <div className="kpi">
-          <div className="label">Max zonal spread</div>
+          <div className="label">Italy max zonal spread</div>
           <div className="value">{kpis.spread.toFixed(2)}<small>€/MWh</small></div>
           <div className="sub">{kpis.hiZone} over {kpis.loZone}</div>
         </div>
         <div className="kpi alarm">
-          <div className="label">Unavailable capacity</div>
+          <div className="label">Italy unavailable capacity</div>
           <div className="value">{(kpis.outMw / 1000).toFixed(2)}<small>GW</small></div>
           <div className="sub">{kpis.nOut} tracked outages</div>
         </div>
@@ -192,7 +204,7 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Day-ahead prices by zone <span className="tag">ENTSO-E A44 · 72h + D+1</span></h2>
+          <h2>Italian day-ahead prices by zone <span className="tag">ENTSO-E A44 · 72h + D+1</span></h2>
           <Chart option={priceOption} />
         </div>
         <div className="panel">
@@ -211,7 +223,7 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Load · actual vs explainable forecast
+          <h2>Italian load · actual vs explainable forecast
             <span className="tag">D+1..D+7 · WAPE {bt.wape_model}% vs naive {bt.wape_naive_weekly}%</span>
           </h2>
           <Chart option={loadOption} className="chart tall" />
@@ -245,7 +257,7 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Cross-border imports · latest available hour <span className="tag">A11 physical flows</span></h2>
+          <h2>Italian cross-border imports · latest hour <span className="tag">A11 physical flows</span></h2>
           {dash.flows_now.length === 0 ? (
             <div style={{ padding: '48px 12px', fontFamily: 'IBM Plex Mono', fontSize: 12.5, color: C.slate, textAlign: 'center' }}>
               No flow data in the last 48h.<br />
@@ -282,7 +294,7 @@ export default function App() {
 
       <footer className="foot">
         <span>Market data © ENTSO-E Transparency Platform</span>
-        <span>Weather: MET Norway · NOAA GFS · DWD · ECMWF open data</span>
+        <span>Weather: ERA5 (Copernicus / Open-Meteo) · MET Norway</span>
         <span>Forecast: LightGBM quantiles + TreeSHAP · model v{fc.model_version}</span>
         <a href="/docs" target="_blank" rel="noreferrer">API docs ↗</a>
         {dash.demo_mode && <span style={{ color: C.amber }}>Synthetic demo data — not for trading decisions</span>}
