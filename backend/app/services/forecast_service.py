@@ -136,6 +136,23 @@ def _load_forecast_series(db: Session, area_national: str) -> pd.Series:
     return pd.Series([r.p50_mw for r in rows], index=idx)
 
 
+def _tso_forecast_forward(db: Session, area: str) -> pd.Series:
+    """The TSO's day-ahead load forecast for the hours ahead of us."""
+    from ..db.models import LoadForecastTso
+    now = datetime.now(timezone.utc)
+    rows = db.execute(select(LoadForecastTso)
+                      .where(LoadForecastTso.area_eic == area,
+                             LoadForecastTso.ts_utc >= now - timedelta(hours=2))
+                      .order_by(LoadForecastTso.ts_utc)).scalars().all()
+    if not rows:
+        return pd.Series(dtype=float)
+    idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
+                            if r.ts_utc.tzinfo is None else r.ts_utc
+                            for r in rows], tz="UTC")
+    s = pd.Series([r.forecast_mw for r in rows], index=idx).sort_index()
+    return s[~s.index.duplicated(keep="last")]
+
+
 def _gas_series(db: Session) -> pd.Series:
     from ..db.models import FuelPrice
     rows = db.execute(select(FuelPrice).where(FuelPrice.fuel == "TTF")
@@ -144,6 +161,20 @@ def _gas_series(db: Session) -> pd.Series:
         return pd.Series(dtype=float)
     idx = pd.DatetimeIndex([pd.Timestamp(r.day, tz="UTC") for r in rows])
     return pd.Series([r.price for r in rows], index=idx)
+
+
+def national_for_zone(zone: str) -> str:
+    """Map a price/bidding zone to the national area its load belongs to.
+
+    Without this, every market's price forecast was fed the DEFAULT market's
+    load forecast (Italy) — so a French price forecast was driven by Italian
+    demand. Silent, and completely wrong.
+    """
+    from ..utils.eic import EU_MARKETS
+    for m in EU_MARKETS.values():
+        if zone in m["zones"] or zone == m["national"]:
+            return m["national"]
+    return get_settings().forecast_default_area
 
 
 def issue_price_forecast(area: str, horizon_hours: int = 48) -> dict:
@@ -160,9 +191,20 @@ def issue_price_forecast(area: str, horizon_hours: int = 48) -> dict:
         price_hist = _price_history_from_db(db, area)
         if len(price_hist) < 200:
             raise RuntimeError("Not enough price history in DB for this area")
-        load_fc = _load_forecast_series(db, s.forecast_default_area)
+        nat = national_for_zone(area)
+        # Serve the same feature we trained on: the TSO's published day-ahead
+        # forecast. Fall back to our own model only where the TSO has not
+        # published (typically beyond D+1).
+        load_fc = _tso_forecast_forward(db, nat)
+        ours = _load_forecast_series(db, nat)
         if load_fc.empty:
-            raise RuntimeError("No load forecast issued yet — run train_forecast.py first")
+            load_fc = ours
+        elif not ours.empty:
+            load_fc = load_fc.combine_first(ours).sort_index()
+        if load_fc.empty:
+            raise RuntimeError(
+                f"No load forecast for {nat} (the national area behind {area}). "
+                f"Run: python scripts/train_forecast.py --area {nat}")
         gas = _gas_series(db)
         pred = pf.predict(price_hist, load_fc, horizon_hours,
                           gas=gas if not gas.empty else None)

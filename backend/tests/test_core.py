@@ -134,6 +134,28 @@ def test_forecast_invalid_horizon(client):
     assert r.status_code == 422
 
 
+def test_weather_history_endpoint(client):
+    # ERA5 temperature must be downloadable for every backfilled market, not
+    # just Italy. Guards the multi-market data catalog.
+    for area in ("10YIT-GRTN-----B", "10YFR-RTE------C",
+                 "10Y1001A1001A83F", "10YCH-SWISSGRIDZ"):
+        r = client.get("/v1/weather/history", params={"area": area})
+        assert r.status_code == 200, area
+        body = r.json()
+        assert "series" in body
+        assert body["lineage"]["dataset"].startswith("Observed temperature")
+
+
+def test_weather_history_uses_de_control_area(client):
+    # Germany's trap: weather is keyed to the control area (…A83F), so the
+    # DE-LU bidding zone (…A82H) must NOT carry weather rows.
+    ctrl = client.get("/v1/weather/history", params={"area": "10Y1001A1001A83F"})
+    zone = client.get("/v1/weather/history", params={"area": "10Y1001A1001A82H"})
+    assert ctrl.status_code == 200 and zone.status_code == 200
+    assert ctrl.json()["count"] > 0
+    assert zone.json()["count"] == 0
+
+
 # ------------------------------------------------------- outage parser
 
 OUTAGE_XML = """<?xml version="1.0" encoding="UTF-8"?>

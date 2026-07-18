@@ -23,10 +23,11 @@ import pandas as pd  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
-from app.db.models import (FuelPrice, LoadActual, PriceDayAhead,  # noqa: E402
-                           SessionLocal, init_db)
+from app.db.models import (FuelPrice, LoadActual, LoadForecastTso,  # noqa: E402
+                           PriceDayAhead, SessionLocal, init_db)
 from app.forecasting.price_model import PriceForecaster  # noqa: E402
-from app.services.forecast_service import issue_price_forecast  # noqa: E402
+from app.services.forecast_service import (issue_price_forecast,  # noqa: E402
+                                           national_for_zone)
 
 
 def series_from(db, model, area, value_attr, days=400):
@@ -40,6 +41,30 @@ def series_from(db, model, area, value_attr, days=400):
                             if r.ts_utc.tzinfo is None else r.ts_utc
                             for r in rows], tz="UTC")
     return pd.Series([getattr(r, value_attr) for r in rows], index=idx).sort_index()
+
+
+def tso_forecast_series(db, area: str, days: int = 800) -> pd.Series:
+    """The TSO's own day-ahead load forecast, from ENTSO-E.
+
+    THIS IS THE RIGHT LOAD FEATURE. Training on ACTUAL load while serving a
+    FORECAST is train/serve skew: the model learns to react sharply to load it
+    will never actually know, then receives a smoothed forecast at inference
+    and produces a flat, muted price curve. The TSO forecast has the same
+    distribution at train time and at serve time, because it is published
+    day-ahead — which is exactly when we need it.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = db.execute(select(LoadForecastTso)
+                      .where(LoadForecastTso.area_eic == area,
+                             LoadForecastTso.ts_utc >= since)
+                      .order_by(LoadForecastTso.ts_utc)).scalars().all()
+    if not rows:
+        return pd.Series(dtype=float)
+    idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
+                            if r.ts_utc.tzinfo is None else r.ts_utc
+                            for r in rows], tz="UTC")
+    s = pd.Series([r.forecast_mw for r in rows], index=idx).sort_index()
+    return s[~s.index.duplicated(keep="last")]
 
 
 def gas_series(db) -> pd.Series:
@@ -63,7 +88,9 @@ def main():
     db = SessionLocal()
     try:
         price = series_from(db, PriceDayAhead, args.area, "price_eur_mwh")
-        load = series_from(db, LoadActual, s.forecast_default_area, "load_mw")
+        nat = national_for_zone(args.area)
+        actual = series_from(db, LoadActual, nat, "load_mw")
+        tso = tso_forecast_series(db, nat)
         gas = gas_series(db)
     finally:
         db.close()
@@ -71,8 +98,26 @@ def main():
     if price.empty:
         sys.exit(f"No price history for {args.area}. Run seed_demo.py or "
                  f"backfill_entsoe.py first.")
-    if load.empty:
-        sys.exit("No load history found — needed as the key price driver.")
+    if actual.empty:
+        sys.exit(f"No load history for {nat} — the national area behind {args.area}. "
+                 f"It is the key price driver. Backfill it first.")
+
+    # Choose the load feature: TSO forecast if we have decent coverage of the
+    # price window, else actual load with an explicit skew warning.
+    cov = 0.0
+    if not tso.empty:
+        cov = float(tso.reindex(price.index).notna().mean())
+    if cov >= 0.80:
+        load, load_src = tso, "tso_forecast"
+        print(f"  load driver: {nat} — TSO day-ahead forecast "
+              f"({len(tso)} h, {cov:.0%} coverage)  [no train/serve skew]")
+    else:
+        load, load_src = actual, "actual_load"
+        print(f"  load driver: {nat} — ACTUAL load ({len(actual)} h)")
+        print(f"  !! TSO forecast covers only {cov:.0%} of the price window.")
+        print(f"     Training on actual load while serving a forecast is TRAIN/SERVE")
+        print(f"     SKEW: the backtest will be optimistic and the issued forecast")
+        print(f"     will look flat. Fix: backfill more TSO forecast history.")
 
     if gas.empty:
         print("  ! No TTF gas data — the gas feature will be inert (zeros).")
@@ -82,7 +127,8 @@ def main():
 
     print(f"Training price model for {args.area} on {len(price)} hourly prices ...")
     pf = PriceForecaster(s.model_dir, args.area)
-    res = pf.train(price, load, gas=gas if not gas.empty else None)
+    res = pf.train(price, load, gas=gas if not gas.empty else None,
+                   load_source=load_src)
     m = res.metrics
 
     print("\n=== Price backtest (last 4 weeks hold-out) ===")

@@ -34,6 +34,39 @@ def prices_dayahead(area: str, start: str | None = None, end: str | None = None,
     return envelope(series, "Day-ahead prices", "ENTSO-E Transparency Platform", demo, "A44")
 
 
+@router.get("/weather/history")
+def weather_history(area: str, start: str | None = None, end: str | None = None,
+                    db: Session = Depends(get_db)):
+    """Observed/reanalysis temperature history (ERA5) per area.
+
+    The same weather series the load model trains on. Available for every area
+    backfilled with scripts/backfill_era5.py — IT, FR, DE and CH today. For DE,
+    pass the control-area EIC (…A83F); weather is keyed to the load area, not
+    the DE-LU bidding zone.
+    """
+    from ..db.models import WeatherHistory
+    from datetime import datetime, timedelta, timezone
+    if start is None and end is None:
+        # Weather is historical-only — anchor the default window at 'now' and
+        # look back, rather than the forward-looking market default that would
+        # overshoot the end of the ERA5 history.
+        e = datetime.now(timezone.utc)
+        s = e - timedelta(days=30)
+    else:
+        s, e = parse_window(start, end, default_hours=720)
+    rows = db.execute(
+        select(WeatherHistory).where(WeatherHistory.area_eic == area,
+                                     WeatherHistory.ts_utc >= s,
+                                     WeatherHistory.ts_utc < e)
+        .order_by(WeatherHistory.ts_utc)).scalars().all()
+    demo = get_settings().demo_mode
+    name = _area_name(db, area)
+    series = [point(r.ts_utc, r.temp_c, "degC", r.area_eic, name,
+                    {"source": r.source}) for r in rows]
+    return envelope(series, "Observed temperature (ERA5)",
+                    "ERA5 (Copernicus / Open-Meteo)", demo, "ERA5")
+
+
 @router.get("/load/actual")
 def load_actual(area: str, start: str | None = None, end: str | None = None,
                 db: Session = Depends(get_db)):

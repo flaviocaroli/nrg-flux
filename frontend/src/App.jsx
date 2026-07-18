@@ -17,7 +17,6 @@ export default function App() {
   const [fc, setFc] = useState(null)
   const [expl, setExpl] = useState(null)
   const [tso, setTso] = useState(null)
-  const [pfc, setPfc] = useState(null)
   const [err, setErr] = useState(null)
   const [explHour, setExplHour] = useState(19)
   const [gridView, setGridView] = useState('eu')  // 'eu' | 'map' | 'schematic'
@@ -27,8 +26,6 @@ export default function App() {
       Promise.all([api.dashboard(), api.forecast(168), api.explain(), api.tsoForecast()])
         .then(([d, f, e, t]) => { setDash(d); setFc(f); setExpl(e); setTso(t) })
         .catch((e) => setErr(String(e)))
-      // price forecast is optional — absent until train_price_forecast.py runs
-      api.priceForecast(48).then(setPfc).catch(() => setPfc(null))
     }
     load()
     const id = setInterval(load, 120000)
@@ -108,32 +105,6 @@ export default function App() {
     }
   }, [expl, explHour])
 
-  const priceFcOption = useMemo(() => {
-    if (!pfc || !dash) return null
-    const hist = (dash.prices?.NORD || []).slice(-48)
-    const band = pfc.forecast.map((p) => [p.ts_utc, p.eur_p10, p.eur_p90])
-    return {
-      backgroundColor: 'transparent',
-      tooltip: { ...tooltipBase, valueFormatter: (v) => (v != null ? `${v.toFixed(2)} €/MWh` : '—') },
-      legend: { textStyle: { color: C.slate, fontFamily: 'IBM Plex Mono', fontSize: 11 }, top: 0,
-        icon: 'roundRect', itemWidth: 14, itemHeight: 3, data: ['Actual (NORD)', 'Forecast p50'] },
-      grid: { left: 52, right: 16, top: 34, bottom: 28 },
-      xAxis: { type: 'time', ...axisBase, splitLine: { show: false } },
-      yAxis: { type: 'value', name: '€/MWh', nameTextStyle: { color: C.slateDim, fontFamily: 'IBM Plex Mono' }, ...axisBase, scale: true },
-      series: [
-        { name: 'p10–p90 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-          stack: 'pband', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
-        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-          stack: 'pband', areaStyle: { color: 'rgba(255,180,84,0.13)' },
-          data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
-        { name: 'Actual (NORD)', type: 'line', showSymbol: false, smooth: 0.15,
-          lineStyle: { width: 2, color: C.chalk }, itemStyle: { color: C.chalk }, data: hist },
-        { name: 'Forecast p50', type: 'line', showSymbol: false, smooth: 0.15,
-          lineStyle: { width: 2.2, color: C.amber }, itemStyle: { color: C.amber },
-          data: pfc.forecast.map((p) => [p.ts_utc, p.eur_p50]) },
-      ],
-    }
-  }, [pfc, dash])
 
   const flowOption = useMemo(() => {
     if (!dash) return null
@@ -258,52 +229,6 @@ export default function App() {
               aria-label="Forecast hour selector" />
           </div>
           <Chart option={driverOption} className="chart short" />
-        </div>
-      </div>
-
-      <div className="section-rule"><span>Price outlook · premium module</span></div>
-
-      <div className="grid">
-        <div className="panel">
-          <h2>Day-ahead price forecast · IT-North
-            <span className="tag">p10/p50/p90 · €/MWh</span>
-            {pfc && (
-              <span className={`skill-badge ${pfc.beats_naive_baseline ? 'good' : 'bad'}`}>
-                {pfc.beats_naive_baseline
-                  ? `beats naive · skill +${pfc.skill_vs_best_naive_pct}%`
-                  : 'does not beat naive baseline'}
-              </span>
-            )}
-          </h2>
-          {pfc ? (
-            <Chart option={priceFcOption} className="chart" />
-          ) : (
-            <div style={{ padding: '64px 12px', fontFamily: 'IBM Plex Mono', fontSize: 12.5, color: C.slate, textAlign: 'center' }}>
-              No price forecast issued yet.<br />
-              Run <span style={{ color: C.amber }}>python scripts/train_price_forecast.py</span>
-            </div>
-          )}
-        </div>
-        <div className="panel">
-          <h2>Model honesty <span className="tag">published with every response</span></h2>
-          {pfc ? (
-            <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 12, color: C.slate, marginTop: 12, lineHeight: 2 }}>
-              <div>model WAPE · <b style={{ color: C.chalk }}>{pfc.backtest_summary?.wape_model}%</b></div>
-              <div>naive weekly · {pfc.backtest_summary?.wape_naive_weekly}%</div>
-              <div>naive daily · {pfc.backtest_summary?.wape_naive_daily}%</div>
-              <div>MAE · {pfc.backtest_summary?.mae_model_eur_mwh} €/MWh</div>
-              <div>p10–p90 coverage · {pfc.backtest_summary?.p10_p90_coverage_pct}%</div>
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.hairline}`, color: C.slateDim, fontSize: 10.5, lineHeight: 1.7, fontFamily: 'inherit' }}>
-                Key input: {pfc.key_input}. Known weaknesses are published in the model
-                card — fuel shocks, scarcity spikes and negative-price hours are not modelled.
-                Decision support, not a trading signal.
-              </div>
-            </div>
-          ) : (
-            <div style={{ padding: '48px 12px', fontFamily: 'IBM Plex Mono', fontSize: 12, color: C.slateDim, textAlign: 'center' }}>
-              Backtest and skill scores appear here once a price model is trained.
-            </div>
-          )}
         </div>
       </div>
 

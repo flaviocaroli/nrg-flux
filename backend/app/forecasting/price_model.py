@@ -163,7 +163,8 @@ class PriceForecaster:
     # ------------------------------------------------------------- training
 
     def train(self, price: pd.Series, load: pd.Series,
-              gas: pd.Series | None = None, n_rounds: int = 350) -> PriceTrainResult:
+              gas: pd.Series | None = None, n_rounds: int = 350,
+              load_source: str = "unknown") -> PriceTrainResult:
         df = _build_frame(price, load, gas)
         if len(df) < 24 * 30:
             raise RuntimeError("need at least ~30 days of overlapping price+load history")
@@ -260,7 +261,11 @@ class PriceForecaster:
             "training_window": [str(train_df.index[0]), str(train_df.index[-1])],
             "backtest_window": [str(test_df.index[0]), str(test_df.index[-1])],
             "features": PRICE_FEATURES,
-            "key_input": "NRG-Flux load forecast p50 (our own model)",
+            "key_input": ("TSO day-ahead load forecast (ENTSO-E)"
+                          if load_source == "tso_forecast"
+                          else "actual load — WARNING: train/serve skew"),
+            "load_feature_source": load_source,
+            "train_serve_skew": load_source != "tso_forecast",
             "gas_feature_active": bool(gas is not None and len(gas) > 0),
             "backtest": metrics,
             "beats_naive_baseline": bool(beats),

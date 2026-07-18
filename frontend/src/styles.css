@@ -290,3 +290,23 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
   background: rgba(13,20,36,.6); color: var(--chalk);
   padding: 2px 7px; border-radius: 4px; font-size: 10.5px;
 }
+
+/* ---- Multi-market: all four countries at once ---- */
+.country-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.country-block { border-top: 1px solid var(--hairline); padding-top: 12px; }
+.country-block:first-child { border-top: none; padding-top: 0; }
+.country-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.country-head .cc {
+  font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+  color: var(--teal); letter-spacing: .12em;
+  border: 1px solid rgba(52,217,195,.4); border-radius: 4px; padding: 1px 7px;
+}
+.country-head .cname { font-family: var(--font-mono); font-size: 12px; color: var(--slate); }
+.grid.grid-even { grid-template-columns: 1fr 1fr; }
+@media (max-width: 900px) { .grid.grid-even { grid-template-columns: 1fr; } }
+
+/* ---- Data catalog: market selector ---- */
+.catalog-country {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline);
+}

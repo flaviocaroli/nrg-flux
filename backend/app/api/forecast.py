@@ -199,7 +199,8 @@ def forecast_price_explain(area: str = "10Y1001A1001A73I", horizon: int = 24):
     """SHAP drivers for the price forecast, in EUR/MWh per feature."""
     from ..forecasting.price_model import PriceForecaster
     from ..services.forecast_service import (_load_forecast_series,
-                                             _price_history_from_db)
+                                             _price_history_from_db,
+                                             national_for_zone)
     s = get_settings()
     pf = PriceForecaster(s.model_dir, area)
     if not pf.load_models():
@@ -207,7 +208,7 @@ def forecast_price_explain(area: str = "10Y1001A1001A73I", horizon: int = 24):
     db = SessionLocal()
     try:
         hist = _price_history_from_db(db, area)
-        load_fc = _load_forecast_series(db, s.forecast_default_area)
+        load_fc = _load_forecast_series(db, national_for_zone(area))
     finally:
         db.close()
     if len(hist) < 200 or load_fc.empty:

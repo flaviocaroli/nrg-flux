@@ -156,6 +156,7 @@ to start:
 git clone
 cd backend
 pip install -r requirements.txt
+
 #download italian market data for the last 30 days (or more)
 python3 scripts/backfill_entsoe.py --days 30
 
@@ -168,3 +169,29 @@ uvicorn app.main:app --port 8000
 cd frontend
 npm install
 npm run dev
+
+# EUROPE 
+# 2 year fill from entso-e power data for Italy, France, Germany and Switzerland
+python3 scripts/backfill_eu.py --markets IT FR DE CH --days 730
+
+# weather data for the last 3 years for Italy, France, Germany and Switzerland
+python3 scripts/backfill_era5.py --area 10YIT-GRTN-----B   --years 3
+python3 scripts/backfill_era5.py --area 10YFR-RTE------C   --years 3
+python3 scripts/backfill_era5.py --area 10Y1001A1001A83F   --years 3
+python3 scripts/backfill_era5.py --area 10YCH-SWISSGRIDZ   --years 3
+
+#train load prediction models 
+python3 scripts/train_forecast.py --area 10YIT-GRTN-----B    # done, 3.04% ✅
+python3 scripts/train_forecast.py --area 10YFR-RTE------C
+python3 scripts/train_forecast.py --area 10Y1001A1001A83F    # DE control area
+python3 scripts/train_forecast.py --area 10YCH-SWISSGRIDZ
+
+#train price prediction models
+python3 scripts/train_price_forecast.py --area 10Y1001A1001A73I   # IT NORD
+python3 scripts/train_price_forecast.py --area 10YFR-RTE------C   # FR
+python3 scripts/train_price_forecast.py --area 10Y1001A1001A82H   # DE-LU zone ≠ load area
+python3 scripts/train_price_forecast.py --area 10YCH-SWISSGRIDZ   # CH
+
+#view on 2 terminals
+uvicorn app.main:app --port 8000        # terminal 1
+cd ../frontend && npm run dev           # terminal 2

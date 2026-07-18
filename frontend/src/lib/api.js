@@ -17,6 +17,8 @@ export const api = {
   loadActual: (area, hours = 96) =>
     get(`/v1/load/actual?area=${encodeURIComponent(area)}`),
   pricesFor: (area) => get(`/v1/prices/dayahead?area=${encodeURIComponent(area)}`),
-  tsoForecast: () => get('/v1/load/forecast/tso?area=10YIT-GRTN-----B'),
+  weather: (area) => get(`/v1/weather/history?area=${encodeURIComponent(area)}`),
+  tsoForecast: (area = '10YIT-GRTN-----B') =>
+    get(`/v1/load/forecast/tso?area=${encodeURIComponent(area)}`),
   status: () => get('/v1/status'),
 }
