@@ -37,6 +37,7 @@ PRICE_FEATURES = [
     "price_roll_24h_mean", "price_roll_168h_mean", "price_roll_24h_std",
     # --- volatility block: lets the quantiles widen when the market is jumpy ---
     "price_roll_168h_std", "price_hour_std_28d", "price_range_24h",
+    "outage_mw", "neighbor_price_lag24",
     # --- fuel block: the marginal generator in EU power is usually gas ---
     "gas_ttf", "gas_ttf_chg_7d", "spark_spread",
 ]
@@ -83,9 +84,14 @@ def pinball(a: np.ndarray, p: np.ndarray, q: float) -> float:
 
 
 def _build_frame(price: pd.Series, load: pd.Series,
-                 gas: pd.Series | None = None) -> pd.DataFrame:
+                 gas: pd.Series | None = None, outage=None, neighbor=None) -> pd.DataFrame:
     """Feature matrix aligned on the price index."""
     df = calendar_frame(price.index)
+    df["outage_mw"] = (outage.reindex(df.index).ffill().fillna(0.0).values
+                       if outage is not None else 0.0)
+    df["neighbor_price_lag24"] = (neighbor.shift(24).reindex(df.index).ffill().fillna(
+        neighbor.mean() if neighbor is not None and len(neighbor) else 0.0).values
+                                  if neighbor is not None else 0.0)
     df["y"] = price.values
 
     ld = load.reindex(price.index).interpolate(limit=6).ffill().bfill()
@@ -168,9 +174,11 @@ class PriceForecaster:
     # ------------------------------------------------------------- training
 
     def train(self, price: pd.Series, load: pd.Series,
-              gas: pd.Series | None = None, n_rounds: int = 350,
+              gas: pd.Series | None = None,
+              outage: pd.Series | None = None,
+              neighbor: pd.Series | None = None, n_rounds: int = 350,
               load_source: str = "unknown") -> PriceTrainResult:
-        df = _build_frame(price, load, gas)
+        df = _build_frame(price, load, gas, outage=outage, neighbor=neighbor)
         if len(df) < 24 * 30:
             raise RuntimeError("need at least ~30 days of overlapping price+load history")
         # ---- three-way split: fit / calibrate / test ------------------------
@@ -380,7 +388,9 @@ class PriceForecaster:
             return False
 
     def _inference_frame(self, price_hist: pd.Series, load_fc: pd.Series,
-                         horizon: int, gas: pd.Series | None = None) -> pd.DataFrame:
+                         horizon: int, gas: pd.Series | None = None,
+                         outage: pd.Series | None = None,
+                         neighbor: pd.Series | None = None) -> pd.DataFrame:
         idx = pd.date_range(price_hist.index[-1] + pd.Timedelta(hours=1),
                             periods=horizon, freq="h", tz="UTC")
         df = calendar_frame(idx)
@@ -388,6 +398,9 @@ class PriceForecaster:
         df["load_p50"] = ld.values
         df["load_ramp_3h"] = ld.diff(3).fillna(0).values
         df["load_vs_week_mean"] = (ld - float(ld.mean())).values
+        df["outage_mw"] = (float(outage.iloc[-1]) if outage is not None and len(outage) else 0.0)
+        df["neighbor_price_lag24"] = (neighbor.shift(24).reindex(idx).ffill().bfill().values
+                                      if neighbor is not None and len(neighbor) else 0.0)
 
         def latest(ts, step):
             t = ts - pd.Timedelta(hours=step)
@@ -425,7 +438,7 @@ class PriceForecaster:
             from .calibration import apply_conditional
             out["p10"], out["p90"] = apply_conditional(
                 out["p10"].to_numpy(), out["p90"].to_numpy(),
-                df["price_hour_std_28d"].to_numpy(), self.cond_threshold,
+                X["price_hour_std_28d"].to_numpy(), self.cond_threshold,
                 self.cond["calm_lo"], self.cond["calm_hi"],
                 self.cond["vol_lo"], self.cond["vol_hi"])
         else:
