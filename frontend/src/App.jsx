@@ -196,9 +196,9 @@ export default function App() {
           <div className="sub">{kpis.hiZone} over {kpis.loZone}</div>
         </div>
         <div className="kpi alarm">
-          <div className="label">Italy unavailable capacity</div>
+          <div className="label">Tracked active generation outages</div>
           <div className="value">{(kpis.outMw / 1000).toFixed(2)}<small>GW</small></div>
-          <div className="sub">{kpis.nOut} tracked outages</div>
+          <div className="sub">{kpis.nOut} validated events shown</div>
         </div>
       </section>
 
@@ -268,7 +268,7 @@ export default function App() {
           )}
         </div>
         <div className="panel" style={{ overflowX: 'auto' }}>
-          <h2>Largest unavailabilities <span className="tag">generation + grid</span></h2>
+          <h2>Active generation unavailability <span className="tag">validated only</span></h2>
           <table className="outages">
             <thead>
               <tr><th>Asset</th><th>Zone</th><th>Type</th><th style={{ textAlign: 'right' }}>MW</th></tr>
@@ -276,7 +276,7 @@ export default function App() {
             <tbody>
               {dash.outages.length === 0 && (
                 <tr><td colSpan="4" style={{ color: 'var(--slate)', padding: '28px 10px', textAlign: 'center' }}>
-                  No current outages ingested — run the backfill to pull A80/A78 unavailability documents.
+                  No validated active generation outages are available.
                 </td></tr>
               )}
               {dash.outages.slice(0, 7).map((o) => (

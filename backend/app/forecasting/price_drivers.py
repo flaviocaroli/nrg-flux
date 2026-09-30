@@ -16,7 +16,12 @@ def outage_series(db, zone_eic: str) -> "pd.Series":
     from app.db.models import Outage
     rows = db.execute(select(Outage.start_utc, Outage.end_utc,
                              Outage.unavailable_mw)
-                      .where(Outage.area_eic == zone_eic)).all()
+                      .where(
+                          Outage.area_eic == zone_eic,
+                          Outage.kind == "generation",
+                          Outage.unavailable_mw >= 0,
+                          Outage.unavailable_mw < 10_000,
+                      )).all()
     if not rows:
         return pd.Series(dtype=float)
     idx_min = min(r[0] for r in rows); idx_max = max(r[1] for r in rows)

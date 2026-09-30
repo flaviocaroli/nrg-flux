@@ -142,7 +142,13 @@ def dashboard_italy(db: Session = Depends(get_db)):
 
     # only outages that are ongoing or ended within the last 3 days
     outage_rows = db.execute(select(Outage)
-                             .where(Outage.end_utc >= now - timedelta(days=3))
+                             .where(
+                                 Outage.kind == "generation",
+                                 Outage.start_utc <= now,
+                                 Outage.end_utc > now,
+                                 Outage.unavailable_mw >= 0,
+                                 Outage.unavailable_mw < 10_000,
+                             )
                              .order_by(Outage.unavailable_mw.desc())
                              .limit(10)).scalars().all()
     outages = [{"asset": r.asset_name, "zone": short.get(r.area_eic) or ZONE_SHORT.get(r.area_eic, r.area_eic),
