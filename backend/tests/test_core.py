@@ -465,3 +465,19 @@ def test_old_model_cards_fall_back_to_symmetric():
         m.scale_lo = float(cal.get("conformal_scale_lo", m.conformal_scale))
         m.scale_hi = float(cal.get("conformal_scale_hi", m.conformal_scale))
         assert m.scale_lo == m.scale_hi == 0.25
+
+
+def test_outage_parser_normalises_kw_nominal_to_mw():
+    from app.parsers.entsoe_xml import parse_unavailability_document
+
+    xml = OUTAGE_XML.replace(
+        "<production_RegisteredResource.pSRType.powerSystemResources.nominalP>780</production_RegisteredResource.pSRType.powerSystemResources.nominalP>",
+        "<production_RegisteredResource.pSRType.powerSystemResources.nominalP>867000.0</production_RegisteredResource.pSRType.powerSystemResources.nominalP>",
+    ).replace(
+        "<Point><position>1</position><quantity>150</quantity></Point>",
+        "<Point><position>1</position><quantity>771</quantity></Point>",
+    )
+
+    row = parse_unavailability_document(xml)[0]
+
+    assert row["unavailable_mw"] == 96.0
