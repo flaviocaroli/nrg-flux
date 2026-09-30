@@ -192,6 +192,19 @@ python3 scripts/train_price_forecast.py --area 10YFR-RTE------C   # FR
 python3 scripts/train_price_forecast.py --area 10Y1001A1001A82H   # DE-LU zone ≠ load area
 python3 scripts/train_price_forecast.py --area 10YCH-SWISSGRIDZ   # CH
 
+
+#scheduler for continuous ingestion
+
+python3 -m pytest tests/ -q
+#one deeper manual top-up first, to heal the 6-day gap in one shot
+python3 scripts/ingest_cycle.py --days 8
+
+#retrain everything on the now-fresh data and reissue forecasts
+python3 scripts/daily_retrain.py --no-wait
+
+#start the continuous loop (WSL: inside tmux, NOT cron)
+python3 scripts/run_scheduler.py
+
 #view on 2 terminals
 uvicorn app.main:app --port 8000        # terminal 1
 cd ../frontend && npm run dev           # terminal 2

@@ -127,7 +127,25 @@ def main():
 
     print(f"Training price model for {args.area} on {len(price)} hourly prices ...")
     pf = PriceForecaster(s.model_dir, args.area)
+    from app.forecasting.price_drivers import outage_series, neighbor_price_series
+    # v9: per-market feature gate. NRGFLUX_V8_FEATURES lists the zones that
+    # use the outage+neighbor drivers; others train exactly as v7. Evidence
+    # so far: FR gains strongly (+7pp coverage), IT is better without.
+    import os as _os
+    _v8_zones = _os.environ.get(
+        "NRGFLUX_V8_FEATURES",
+        "10YFR-RTE------C,10Y1001A1001A82H,10YCH-SWISSGRIDZ").split(",")
+    if args.area in [z.strip() for z in _v8_zones]:
+        _out = outage_series(db, args.area); _nb = neighbor_price_series(db, args.area)
+    else:
+        import pandas as _pd
+        _out, _nb = _pd.Series(dtype=float), _pd.Series(dtype=float)
+        print("  v8 drivers: OFF for this zone (NRGFLUX_V8_FEATURES)")
+    if len(_out): print(f"  outages: {int(_out.max())} MW peak unavailable in zone history")
+    if len(_nb):  print(f"  neighbor prices: {len(_nb)} h")
     res = pf.train(price, load, gas=gas if not gas.empty else None,
+                   outage=_out if len(_out) else None,
+                   neighbor=_nb if len(_nb) else None,
                    load_source=load_src)
     m = res.metrics
 

@@ -1,0 +1,16 @@
+# NRG-Flux · incremental market-data ingestion (one cycle)
+# Install: see deploy/systemd/install.sh
+[Unit]
+Description=NRG-Flux ingest cycle (ENTSO-E + ERA5 top-up + quality checks)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nrgflux
+WorkingDirectory=/opt/nrg-flux/backend
+EnvironmentFile=/opt/nrg-flux/backend/.env
+ExecStart=/usr/bin/python3 scripts/ingest_cycle.py
+# generous ceiling; the script has its own per-step timeouts
+TimeoutStartSec=45min
+Nice=5

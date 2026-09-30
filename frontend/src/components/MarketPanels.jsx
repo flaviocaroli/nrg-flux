@@ -31,7 +31,7 @@ function loadChart(loadFc, loadAct) {
       { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
         stack: 'b', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
       { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-        stack: 'b', areaStyle: { color: 'rgba(52,217,195,0.14)' },
+        stack: 'b', areaStyle: { color: 'rgba(31,73,224,0.10)' },
         data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
       { name: 'Actual', type: 'line', showSymbol: false, lineStyle: { width: 2, color: C.chalk },
         itemStyle: { color: C.chalk }, data: (loadAct || []).map((p) => [p.ts_utc, p.value]) },
@@ -56,7 +56,7 @@ function priceChart(priceFc, priceAct) {
       { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
         stack: 'pb', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
       { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-        stack: 'pb', areaStyle: { color: 'rgba(255,180,84,0.13)' },
+        stack: 'pb', areaStyle: { color: 'rgba(215,126,0,0.10)' },
         data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
       { name: 'Actual', type: 'line', showSymbol: false, smooth: 0.12,
         lineStyle: { width: 2, color: C.chalk }, itemStyle: { color: C.chalk },
@@ -67,17 +67,6 @@ function priceChart(priceFc, priceAct) {
     ],
   }
 }
-
-const badge = (fc) => fc && (
-  <span className={`skill-badge ${fc.beats_naive_baseline ? 'good' : 'bad'}`}>
-    {fc.beats_naive_baseline
-      ? `beats naive${fc.skill_vs_best_naive_pct != null ? ` · +${fc.skill_vs_best_naive_pct}%` : ''}`
-      : 'does not beat naive'}
-  </span>
-)
-const cov = (fc) => fc?.coverage?.achieved_pct != null && (
-  <span className="tag">coverage {fc.coverage.achieved_pct}% / {fc.coverage.target_pct}%</span>
-)
 
 function CountryBlock({ market }) {
   const [data, setData] = useState(null)
@@ -121,38 +110,30 @@ function CountryBlock({ market }) {
           <h2>Load forecast
             {data?.loadFc && <span className="tag">{data.loadFc.training_source === 'synthetic'
               ? '⚠ synthetic' : `trained on ${data.loadFc.training_source || 'n/a'}`}</span>}
-            {cov(data?.loadFc)}
-            {badge(data?.loadFc)}
           </h2>
           {data && !data.loadFc && (
             <div className="train-hint">
-              No load model for {market.name} yet — showing actual load only.<br />
-              <code>python3 scripts/train_forecast.py --area {market.national_eic}</code>
+              Demand forecast is temporarily unavailable. Showing actual load where available.
             </div>
           )}
           {lo ? <Chart option={lo} /> : !busy && (
             <div className="empty-note">
-              No load data for {market.name}.<br />
-              <code>python3 scripts/backfill_eu.py --markets {market.country}</code>
+              No load data is currently available for {market.name}.
             </div>
           )}
         </div>
 
         <div className="panel">
           <h2>Price forecast · {zoneLabel}
-            {cov(data?.priceFc)}
-            {badge(data?.priceFc)}
           </h2>
           {data && !data.priceFc && (
             <div className="train-hint">
-              No price model for {zoneLabel} yet — showing actual prices only.<br />
-              <code>python3 scripts/train_price_forecast.py --area {market.zones[0].eic}</code>
+              Price forecast is temporarily unavailable. Showing day-ahead prices where available.
             </div>
           )}
           {po ? <Chart option={po} /> : !busy && (
             <div className="empty-note">
-              No price data for {market.name}.<br />
-              <code>python3 scripts/backfill_eu.py --markets {market.country}</code>
+              No price data is currently available for {market.name}.
             </div>
           )}
         </div>

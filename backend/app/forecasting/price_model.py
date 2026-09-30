@@ -37,6 +37,7 @@ PRICE_FEATURES = [
     "price_roll_24h_mean", "price_roll_168h_mean", "price_roll_24h_std",
     # --- volatility block: lets the quantiles widen when the market is jumpy ---
     "price_roll_168h_std", "price_hour_std_28d", "price_range_24h",
+    "outage_mw", "neighbor_price_lag24",
     # --- fuel block: the marginal generator in EU power is usually gas ---
     "gas_ttf", "gas_ttf_chg_7d", "spark_spread",
 ]
@@ -83,9 +84,14 @@ def pinball(a: np.ndarray, p: np.ndarray, q: float) -> float:
 
 
 def _build_frame(price: pd.Series, load: pd.Series,
-                 gas: pd.Series | None = None) -> pd.DataFrame:
+                 gas: pd.Series | None = None, outage=None, neighbor=None) -> pd.DataFrame:
     """Feature matrix aligned on the price index."""
     df = calendar_frame(price.index)
+    df["outage_mw"] = (outage.reindex(df.index).ffill().fillna(0.0).values
+                       if outage is not None else 0.0)
+    df["neighbor_price_lag24"] = (neighbor.shift(24).reindex(df.index).ffill().fillna(
+        neighbor.mean() if neighbor is not None and len(neighbor) else 0.0).values
+                                  if neighbor is not None else 0.0)
     df["y"] = price.values
 
     ld = load.reindex(price.index).interpolate(limit=6).ffill().bfill()
@@ -152,7 +158,12 @@ class PriceForecaster:
         self.boosters: dict[str, lgb.Booster] = {}
         self.model_card: dict = {}
         self.conformal_q: float = 0.0       # additive widening (reporting)
-        self.conformal_scale: float = 0.0   # normalized CQR factor
+        self.conformal_scale: float = 0.0   # legacy symmetric factor (back-compat)
+        self.scale_lo: float = 0.0          # asymmetric CQR: lower-edge factor
+        self.scale_hi: float = 0.0          # asymmetric CQR: upper-edge factor
+        # v7 conditional calibration: per-volatility-regime factors
+        self.cond_threshold: float | None = None
+        self.cond: dict = {}                # {calm_lo, calm_hi, vol_lo, vol_hi}
 
     def _path(self, q: str) -> str:
         return os.path.join(self.model_dir, f"lgbm_price_{self.area_eic}_{q}.txt")
@@ -163,9 +174,11 @@ class PriceForecaster:
     # ------------------------------------------------------------- training
 
     def train(self, price: pd.Series, load: pd.Series,
-              gas: pd.Series | None = None, n_rounds: int = 350,
+              gas: pd.Series | None = None,
+              outage: pd.Series | None = None,
+              neighbor: pd.Series | None = None, n_rounds: int = 350,
               load_source: str = "unknown") -> PriceTrainResult:
-        df = _build_frame(price, load, gas)
+        df = _build_frame(price, load, gas, outage=outage, neighbor=neighbor)
         if len(df) < 24 * 30:
             raise RuntimeError("need at least ~30 days of overlapping price+load history")
         # ---- three-way split: fit / calibrate / test ------------------------
@@ -182,15 +195,12 @@ class PriceForecaster:
         # capped at 2 weeks and floored at 72h, but never more than 40% —
         # with short histories a fixed 2-week window can leave nothing to fit.
         n_tv = len(trainval)
-        # Calibration slice: 20% of the remaining history, floored at 2 weeks and
-        # capped at 35%. NO fixed day-cap — conformal coverage depends on the
-        # calibration set being distributionally close to the test window, and
-        # a 2-week slice of a 2-year series is neither large nor representative.
-        # Calibration size drives the coverage guarantee: too small a slice and
-        # the scale factor is fit on an unrepresentative window. Take 15% of the
-        # available history (floor 2 weeks, ceiling 30%) — with 2 years of data
-        # that is ~100 days rather than a hard-capped 14.
-        cal_n = int(min(max(n_tv * 0.15, 24 * 14), n_tv * 0.30))
+        # v6 ROLLING slice: most recent NRGFLUX_CAL_DAYS (default 45). Price
+        # regimes shift with fuels and seasons; factors calibrated on the
+        # recent window transfer, a 100-day mixed-regime slice does not. The
+        # daily scheduler retrain turns this into rolling recalibration.
+        from .calibration import rolling_cal_hours
+        cal_n = rolling_cal_hours(n_tv)
         if n_tv - cal_n < 24 * 7:
             raise RuntimeError(
                 f"not enough price history to fit AND calibrate "
@@ -211,23 +221,64 @@ class PriceForecaster:
         #  that happens to be too wide)
         # normalized CQR — multiplicative, so the band scales with how
         # uncertain the model already is (peak hours vs 3am, calm vs spiky)
-        width_cal = np.maximum(hi_cal - lo_cal, 1e-6)
+        # ASYMMETRIC (v6): spikes break the band upward far more than
+        # negative-price hours break it downward — one symmetric factor was
+        # averaging the two and under-covering both tails.
+        from .calibration import asymmetric_cqr, conditional_asymmetric_cqr
+        scales = asymmetric_cqr(y_cal, lo_cal, hi_cal, TARGET_COVERAGE)
+        self.scale_lo, self.scale_hi = scales.lo, scales.hi
+        self.conformal_scale = scales.symmetric_equivalent  # legacy field
+        # v7 CONDITIONAL: calm vs volatile regimes split on the per-hour 28d
+        # volatility feature — the global factor under-covers spiky hours and
+        # over-covers calm ones; per-regime factors fix both directions.
+        cond_cal = cal_df["price_hour_std_28d"].to_numpy()
+        # SELECTION GUARD: conditional helps where regimes are stable (DE/IT)
+        # and hurts where they are not (FR). Decide per market on a held-out
+        # tail of the calibration slice — never on the test window. Fit both
+        # schemes on the first 80%, score coverage error on the last 20%,
+        # keep the winner, then refit it on the full slice.
+        from .calibration import apply_conditional, apply_scales as _aps
+        k = max(int(len(y_cal) * 0.8), 1)
+        g_fit = asymmetric_cqr(y_cal[:k], lo_cal[:k], hi_cal[:k], TARGET_COVERAGE)
+        c_fit = conditional_asymmetric_cqr(y_cal[:k], lo_cal[:k], hi_cal[:k],
+                                           cond_cal[:k], TARGET_COVERAGE)
+        yv, lov, hiv, cv = y_cal[k:], lo_cal[k:], hi_cal[k:], cond_cal[k:]
+        g10, g90 = _aps(lov, hiv, g_fit.lo, g_fit.hi)
+        c10, c90 = apply_conditional(lov, hiv, cv, c_fit["threshold"],
+                                     c_fit["calm"].lo, c_fit["calm"].hi,
+                                     c_fit["volatile"].lo, c_fit["volatile"].hi)
+        g_err = abs(float(np.mean((yv >= g10) & (yv <= g90))) - TARGET_COVERAGE)
+        c_err = abs(float(np.mean((yv >= c10) & (yv <= c90))) - TARGET_COVERAGE)
+        # conditional must beat global by a clear margin (2pp of coverage
+        # error) on the validation tail — complexity needs evidence.
+        self.calibration_scheme = "conditional" if c_err < g_err - 0.02 else "global"
+        if self.calibration_scheme == "conditional":
+            cres = conditional_asymmetric_cqr(y_cal, lo_cal, hi_cal, cond_cal,
+                                              TARGET_COVERAGE)
+            self.cond_threshold = cres["threshold"]
+            self.cond = {"calm_lo": cres["calm"].lo, "calm_hi": cres["calm"].hi,
+                         "vol_lo": cres["volatile"].lo,
+                         "vol_hi": cres["volatile"].hi}
+        else:
+            self.cond_threshold, self.cond = None, {}
         raw_scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
-        norm_scores = raw_scores / width_cal
-        n_cal = len(norm_scores)
+        n_cal = scales.n
         level = min(np.ceil((n_cal + 1) * TARGET_COVERAGE) / n_cal, 1.0)
-        self.conformal_scale = float(np.quantile(norm_scores, level, method="higher"))
         self.conformal_q = float(np.quantile(raw_scores, level, method="higher"))
-        raw_cal_cov = float(np.mean((y_cal >= lo_cal) & (y_cal <= hi_cal)) * 100)
+        raw_cal_cov = scales.raw_coverage_pct
 
         y = test_df["y"].to_numpy()
         p50 = self.boosters["p50"].predict(test_df[PRICE_FEATURES])
         p10_raw = self.boosters["p10"].predict(test_df[PRICE_FEATURES])
         p90_raw = self.boosters["p90"].predict(test_df[PRICE_FEATURES])
         # apply the correction learned on the calibration slice
-        width_test = np.maximum(p90_raw - p10_raw, 1e-6)
-        p10 = p10_raw - self.conformal_scale * width_test
-        p90 = p90_raw + self.conformal_scale * width_test
+        if self.cond_threshold is not None:
+            p10, p90 = apply_conditional(
+                p10_raw, p90_raw, test_df["price_hour_std_28d"].to_numpy(),
+                self.cond_threshold, self.cond["calm_lo"], self.cond["calm_hi"],
+                self.cond["vol_lo"], self.cond["vol_hi"])
+        else:
+            p10, p90 = _aps(p10_raw, p90_raw, self.scale_lo, self.scale_hi)
         naive = test_df["price_lag_168h"].to_numpy()      # last week, same hour
         naive_d1 = test_df["price_lag_24h"].to_numpy()    # yesterday, same hour
 
@@ -275,7 +326,19 @@ class PriceForecaster:
                 "target_coverage_pct": round(TARGET_COVERAGE * 100, 1),
                 "conformal_q_eur_mwh": round(self.conformal_q, 3),
                 "conformal_scale": round(self.conformal_scale, 4),
-                "mode": "normalized (multiplicative)",
+                "conformal_scale_lo": round(self.scale_lo, 4),
+                "conformal_scale_hi": round(self.scale_hi, 4),
+                "scheme": getattr(self, "calibration_scheme", "global"),
+                **({"conditional": {
+                    "feature": "price_hour_std_28d",
+                    "threshold": round(self.cond_threshold, 3),
+                    "calm_lo": round(self.cond["calm_lo"], 4),
+                    "calm_hi": round(self.cond["calm_hi"], 4),
+                    "vol_lo": round(self.cond["vol_lo"], 4),
+                    "vol_hi": round(self.cond["vol_hi"], 4),
+                }} if self.cond_threshold is not None else {}),
+                "mode": "normalized asymmetric CQR, rolling weighted window, "
+                        "per-market scheme selection (v7)",
                 "calibration_window": [str(cal_df.index[0]), str(cal_df.index[-1])],
                 "note": "p10/p90 are widened by conformal_q, learned on a held-out "
                         "calibration slice. Raw GBM quantiles are too narrow on "
@@ -310,12 +373,24 @@ class PriceForecaster:
                 cal = self.model_card.get("calibration", {})
                 self.conformal_q = float(cal.get("conformal_q_eur_mwh", 0.0))
                 self.conformal_scale = float(cal.get("conformal_scale", 0.0))
+                # v6 asymmetric factors; older cards fall back to symmetric
+                self.scale_lo = float(cal.get("conformal_scale_lo",
+                                              self.conformal_scale))
+                self.scale_hi = float(cal.get("conformal_scale_hi",
+                                              self.conformal_scale))
+                c = cal.get("conditional")
+                if c:
+                    self.cond_threshold = float(c["threshold"])
+                    self.cond = {k: float(c[k]) for k in
+                                 ("calm_lo", "calm_hi", "vol_lo", "vol_hi")}
             return True
         except Exception:
             return False
 
     def _inference_frame(self, price_hist: pd.Series, load_fc: pd.Series,
-                         horizon: int, gas: pd.Series | None = None) -> pd.DataFrame:
+                         horizon: int, gas: pd.Series | None = None,
+                         outage: pd.Series | None = None,
+                         neighbor: pd.Series | None = None) -> pd.DataFrame:
         idx = pd.date_range(price_hist.index[-1] + pd.Timedelta(hours=1),
                             periods=horizon, freq="h", tz="UTC")
         df = calendar_frame(idx)
@@ -323,6 +398,9 @@ class PriceForecaster:
         df["load_p50"] = ld.values
         df["load_ramp_3h"] = ld.diff(3).fillna(0).values
         df["load_vs_week_mean"] = (ld - float(ld.mean())).values
+        df["outage_mw"] = (float(outage.iloc[-1]) if outage is not None and len(outage) else 0.0)
+        df["neighbor_price_lag24"] = (neighbor.shift(24).reindex(idx).ffill().bfill().values
+                                      if neighbor is not None and len(neighbor) else 0.0)
 
         def latest(ts, step):
             t = ts - pd.Timedelta(hours=step)
@@ -356,8 +434,16 @@ class PriceForecaster:
             out[q] = self.boosters[q].predict(X[PRICE_FEATURES])
         # normalized conformal widening, validated in the backtest
         width = np.maximum(out["p90"] - out["p10"], 1e-6)
-        out["p10"] = out["p10"] - self.conformal_scale * width
-        out["p90"] = out["p90"] + self.conformal_scale * width
+        if self.cond_threshold is not None and self.cond:
+            from .calibration import apply_conditional
+            out["p10"], out["p90"] = apply_conditional(
+                out["p10"].to_numpy(), out["p90"].to_numpy(),
+                X["price_hour_std_28d"].to_numpy(), self.cond_threshold,
+                self.cond["calm_lo"], self.cond["calm_hi"],
+                self.cond["vol_lo"], self.cond["vol_hi"])
+        else:
+            out["p10"] = out["p10"] - self.scale_lo * width
+            out["p90"] = out["p90"] + self.scale_hi * width
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])
         return out

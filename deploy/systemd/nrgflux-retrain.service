@@ -1,0 +1,15 @@
+# NRG-Flux · daily retrain + forecast reissue after the day-ahead publication
+[Unit]
+Description=NRG-Flux daily retrain (all markets, load then price)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nrgflux
+WorkingDirectory=/opt/nrg-flux/backend
+EnvironmentFile=/opt/nrg-flux/backend/.env
+ExecStart=/usr/bin/python3 scripts/daily_retrain.py
+# publication-gate retries (8 x 10 min) + 8 model trainings need headroom
+TimeoutStartSec=4h
+Nice=5

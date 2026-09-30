@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from lxml import etree
 
-PARSER_VERSION = "1.0.0"
+PARSER_VERSION = "1.1.0"
 
 _RES = {"PT15M": 15, "PT30M": 30, "PT60M": 60, "P1D": 1440}
 
@@ -77,6 +77,23 @@ PSR_FUEL = {
 }
 
 
+
+def _normalise_nominal_power_mw(
+    nominal: float | None,
+    available_mw: list[float],
+) -> float | None:
+    """Convert known A80 nominal-power values in kW before MW subtraction."""
+    if nominal is None:
+        return None
+
+    if nominal >= 100_000:
+        scaled_mw = nominal / 1_000.0
+        if not available_mw or scaled_mw >= max(available_mw):
+            return scaled_mw
+
+    return nominal
+
+
 def parse_unavailability_document(xml: str) -> list[dict]:
     """Parse an Unavailability_MarketDocument (doc types A77/A78/A80).
 
@@ -131,7 +148,7 @@ def parse_unavailability_document(xml: str) -> list[dict]:
                or t(ts, "Asset_RegisteredResource.pSRType.psrType"))
         nominal_txt = t(ts, "production_RegisteredResource.pSRType."
                             "powerSystemResources.nominalP")
-        nominal = float(nominal_txt) if nominal_txt else None
+        nominal_raw = float(nominal_txt) if nominal_txt else None
 
         avail_vals, p_start, p_end = [], "", ""
         for period in ts.iter("Available_Period"):
@@ -141,6 +158,8 @@ def parse_unavailability_document(xml: str) -> list[dict]:
                 q = point.findtext("quantity")
                 if q is not None:
                     avail_vals.append(float(q.strip()))
+
+        nominal = _normalise_nominal_power_mw(nominal_raw, avail_vals)
 
         start_txt = w_start or p_start
         end_txt = w_end or p_end

@@ -6,6 +6,7 @@ import ItalyMap from './components/ItalyMap'
 import EuropeMap from './components/EuropeMap'
 import DataCatalog from './components/DataCatalog'
 import MarketPanels from './components/MarketPanels'
+import ProfileCostPanel from './components/ProfileCostPanel'
 
 const fmtHour = (iso) =>
   new Date(iso).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })
@@ -23,9 +24,18 @@ export default function App() {
 
   useEffect(() => {
     const load = () => {
-      Promise.all([api.dashboard(), api.forecast(168), api.explain(), api.tsoForecast()])
-        .then(([d, f, e, t]) => { setDash(d); setFc(f); setExpl(e); setTso(t) })
-        .catch((e) => setErr(String(e)))
+      Promise.allSettled([api.dashboard(), api.forecast(168), api.explain(), api.tsoForecast()])
+        .then(([dashboard, forecast, explanation, tsoForecast]) => {
+          if (dashboard.status !== 'fulfilled') {
+            setErr(String(dashboard.reason))
+            return
+          }
+          setErr(null)
+          setDash(dashboard.value)
+          setFc(forecast.status === 'fulfilled' ? forecast.value : null)
+          setExpl(explanation.status === 'fulfilled' ? explanation.value : null)
+          setTso(tsoForecast.status === 'fulfilled' ? tsoForecast.value : null)
+        })
     }
     load()
     const id = setInterval(load, 120000)
@@ -33,13 +43,13 @@ export default function App() {
   }, [])
 
   const kpis = useMemo(() => {
-    if (!dash || !fc) return null
+    if (!dash) return null
     const lastByZone = Object.entries(dash.prices).map(([z, s]) => [z, s.at(-1)?.[1] ?? 0])
     const pun = lastByZone.reduce((a, [, v]) => a + v, 0) / lastByZone.length
     const hi = lastByZone.reduce((a, b) => (b[1] > a[1] ? b : a))
     const lo = lastByZone.reduce((a, b) => (b[1] < a[1] ? b : a))
-    const next24 = fc.forecast.slice(0, 24)
-    const peak = next24.reduce((a, b) => (b.mw_p50 > a.mw_p50 ? b : a), next24[0])
+    const next24 = fc?.forecast?.slice(0, 24) || []
+    const peak = next24.length ? next24.reduce((a, b) => (b.mw_p50 > a.mw_p50 ? b : a), next24[0]) : null
     const outMw = dash.outages.reduce((a, o) => a + o.mw, 0)
     const loadNow = dash.load.at(-1)?.[1] ?? 0
     return { pun, spread: hi[1] - lo[1], hiZone: hi[0], loZone: lo[0], peak, outMw, nOut: dash.outages.length, loadNow }
@@ -76,7 +86,7 @@ export default function App() {
       yAxis: { type: 'value', name: 'MW', nameTextStyle: { color: C.slateDim, fontFamily: 'IBM Plex Mono' }, ...axisBase, scale: true },
       series: [
         { name: 'p10–p90 band', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', data: band.map(([t, lo]) => [t, lo]) },
-        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', areaStyle: { color: 'rgba(52,217,195,0.14)' }, data: band.map(([t, lo, hi]) => [t, hi - lo]) },
+        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', areaStyle: { color: 'rgba(31,73,224,0.10)' }, data: band.map(([t, lo, hi]) => [t, hi - lo]) },
         { name: 'Actual load', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.chalk }, itemStyle: { color: C.chalk }, data: dash.load },
         { name: 'NRG-Flux p50', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.teal }, itemStyle: { color: C.teal }, data: fc.forecast.map((p) => [p.ts_utc, p.mw_p50]) },
         { name: 'TSO day-ahead', type: 'line', showSymbol: false, lineStyle: { width: 1.4, color: C.amber, type: 'dashed' }, itemStyle: { color: C.amber }, data: (tso?.series || []).map((p) => [p.ts_utc, p.value]) },
@@ -127,25 +137,24 @@ export default function App() {
   if (err) return (
     <div className="error">
       <div>
-        Italy Power Watch can't reach the NRG-Flux API.
+        Europe Grid Pulse can't reach the NRG-Flux API.
         <code>{err}</code>
-        <code>Start it with: cd backend && uvicorn app.main:app --port 8000</code>
       </div>
     </div>
   )
-  if (!dash || !fc || !kpis) return <div className="loading">syncing with the grid …</div>
+  if (!dash || !kpis) return <div className="loading">syncing with the European grid …</div>
 
   const tickerItems = Object.entries(dash.prices).map(([z, s]) => {
     const last = s.at(-1)?.[1], prev = s.at(-25)?.[1] ?? last
     return { z, v: last, d: last - prev }
   })
-  const bt = fc.backtest_summary || {}
-
   return (
     <div className="shell">
       <header className="masthead">
         <span className="brand">NRG<b>-FLUX</b></span>
-        <h1>Italy Power Watch</h1>
+        <h1>Europe Grid Pulse
+          <small>day-ahead markets · calibrated forecasts · IT · FR · DE · CH</small>
+        </h1>
         <div className="meta">
           <span>{new Date(dash.generated_at_utc).toUTCString().replace('GMT', 'UTC')}</span>
           <span className={`pill ${dash.demo_mode ? 'demo' : ''}`}>
@@ -153,6 +162,16 @@ export default function App() {
           </span>
         </div>
       </header>
+
+      {/* The signature: Europe's grid runs at 50 Hz — so does the masthead. */}
+      <svg className="pulse-rule" viewBox="0 0 1200 22" preserveAspectRatio="none" aria-hidden="true">
+        <line className="base" x1="0" y1="11" x2="1200" y2="11" />
+        <path className="wave" d={Array.from({ length: 30 }, (_, i) =>
+          `${i === 0 ? 'M0 11 ' : ''}Q${i * 40 + 10} ${i % 2 ? 21 : 1} ${i * 40 + 20} 11 T${i * 40 + 40} 11`
+        ).join(' ')} />
+      </svg>
+
+      <div className="section-rule"><span>Italy · reference market</span></div>
 
       <div className="ticker" aria-hidden="true">
         <div className="ticker-track">
@@ -169,30 +188,34 @@ export default function App() {
 
       <section className="kpis">
         <div className="kpi amber">
-          <div className="label">Avg zonal price · latest hour</div>
+          <div className="label">Italy six-zone price benchmark · latest hour</div>
           <div className="value">{kpis.pun.toFixed(2)}<small>€/MWh</small></div>
-          <div className="sub">proxy for PUN across 6 zones</div>
+          <div className="sub">unweighted zonal average · not official PUN</div>
         </div>
         <div className="kpi teal">
-          <div className="label">Tomorrow peak load · p50</div>
-          <div className="value">{(kpis.peak.mw_p50 / 1000).toFixed(1)}<small>GW</small></div>
-          <div className="sub">{fmtHour(kpis.peak.ts_utc)} CET · band {(kpis.peak.mw_p10 / 1000).toFixed(1)}–{(kpis.peak.mw_p90 / 1000).toFixed(1)} GW</div>
+          <div className="label">Italy tomorrow peak load · p50</div>
+          <div className="value">{kpis.peak ? (kpis.peak.mw_p50 / 1000).toFixed(1) : '—'}<small>GW</small></div>
+          <div className="sub">{kpis.peak ? `${fmtHour(kpis.peak.ts_utc)} CET · band ${(kpis.peak.mw_p10 / 1000).toFixed(1)}–${(kpis.peak.mw_p90 / 1000).toFixed(1)} GW` : 'forecast temporarily unavailable'}</div>
         </div>
         <div className="kpi">
-          <div className="label">Max zonal spread</div>
+          <div className="label">Italy max zonal spread</div>
           <div className="value">{kpis.spread.toFixed(2)}<small>€/MWh</small></div>
           <div className="sub">{kpis.hiZone} over {kpis.loZone}</div>
         </div>
         <div className="kpi alarm">
-          <div className="label">Unavailable capacity</div>
+          <div className="label">Tracked active generation outages</div>
           <div className="value">{(kpis.outMw / 1000).toFixed(2)}<small>GW</small></div>
-          <div className="sub">{kpis.nOut} tracked outages</div>
+          <div className="sub">{kpis.nOut} monitored events · not a national total</div>
         </div>
       </section>
 
+      <div className="section-rule"><span>Turn a load profile into a benchmark</span></div>
+
+      <ProfileCostPanel />
+
       <div className="grid">
         <div className="panel">
-          <h2>Day-ahead prices by zone <span className="tag">ENTSO-E A44 · 72h + D+1</span></h2>
+          <h2>Italian day-ahead prices by zone <span className="tag">ENTSO-E A44 · 72h + D+1</span></h2>
           <Chart option={priceOption} />
         </div>
         <div className="panel">
@@ -211,10 +234,12 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Load · actual vs explainable forecast
-            <span className="tag">D+1..D+7 · WAPE {bt.wape_model}% vs naive {bt.wape_naive_weekly}%</span>
+          <h2>Italian load · actual vs forecast
+            <span className="tag">D+1..D+7 · evaluation claims withheld pending audit</span>
           </h2>
-          <Chart option={loadOption} className="chart tall" />
+          {loadOption ? <Chart option={loadOption} className="chart tall" /> : (
+            <div className="empty-note">Demand forecast is temporarily unavailable. Market data remains available.</div>
+          )}
         </div>
         <div className="panel">
           <h2>Why demand moves <span className="tag">SHAP · MW per driver</span></h2>
@@ -228,7 +253,9 @@ export default function App() {
               style={{ width: '100%', marginTop: 8, accentColor: C.teal }}
               aria-label="Forecast hour selector" />
           </div>
-          <Chart option={driverOption} className="chart short" />
+          {driverOption ? <Chart option={driverOption} className="chart short" /> : (
+            <div className="empty-note">Forecast explanation is temporarily unavailable.</div>
+          )}
         </div>
       </div>
 
@@ -245,18 +272,17 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Cross-border imports · latest available hour <span className="tag">A11 physical flows</span></h2>
+          <h2>Italian cross-border imports · latest hour <span className="tag">A11 physical flows</span></h2>
           {dash.flows_now.length === 0 ? (
             <div style={{ padding: '48px 12px', fontFamily: 'IBM Plex Mono', fontSize: 12.5, color: C.slate, textAlign: 'center' }}>
-              No flow data in the last 48h.<br />
-              Run <span style={{ color: C.amber }}>python scripts/backfill_entsoe.py</span> to ingest border flows.
+              No border-flow data is currently available for the latest 48 hours.
             </div>
           ) : (
             <Chart option={flowOption} className="chart short" />
           )}
         </div>
         <div className="panel" style={{ overflowX: 'auto' }}>
-          <h2>Largest unavailabilities <span className="tag">generation + grid</span></h2>
+          <h2>Active generation unavailability <span className="tag">validated only</span></h2>
           <table className="outages">
             <thead>
               <tr><th>Asset</th><th>Zone</th><th>Type</th><th style={{ textAlign: 'right' }}>MW</th></tr>
@@ -264,7 +290,7 @@ export default function App() {
             <tbody>
               {dash.outages.length === 0 && (
                 <tr><td colSpan="4" style={{ color: 'var(--slate)', padding: '28px 10px', textAlign: 'center' }}>
-                  No current outages ingested — run the backfill to pull A80/A78 unavailability documents.
+                  No validated active generation outages are available.
                 </td></tr>
               )}
               {dash.outages.slice(0, 7).map((o) => (
@@ -282,8 +308,8 @@ export default function App() {
 
       <footer className="foot">
         <span>Market data © ENTSO-E Transparency Platform</span>
-        <span>Weather: MET Norway · NOAA GFS · DWD · ECMWF open data</span>
-        <span>Forecast: LightGBM quantiles + TreeSHAP · model v{fc.model_version}</span>
+        <span>Weather: ERA5 (Copernicus / Open-Meteo) · MET Norway</span>
+        <span>Forecast: LightGBM quantiles + TreeSHAP · model v{fc?.model_version || 'unavailable'}</span>
         <a href="/docs" target="_blank" rel="noreferrer">API docs ↗</a>
         {dash.demo_mode && <span style={{ color: C.amber }}>Synthetic demo data — not for trading decisions</span>}
       </footer>

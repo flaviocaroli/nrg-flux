@@ -1,26 +1,36 @@
 import { useEffect, useRef } from 'react'
 import * as echarts from 'echarts'
 
+/*
+ * Design tokens — "Europe Grid Pulse", daylight control room.
+ * Cool paper ground, white instrument cards, ink numerals.
+ *   voltage cobalt -> demand / our forecasts
+ *   auction amber  -> markets / prices
+ *   alarm red      -> outages / warnings
+ * Token NAMES are kept from the previous theme so every component
+ * keeps working: `harbor` is now the paper ground, `chalk` the ink.
+ */
 export const C = {
-  harbor: '#0d1424', panel: '#131d33', hairline: '#26334f',
-  chalk: '#e9eef8', slate: '#8da0c4', slateDim: '#5a6b8f',
-  amber: '#ffb454', teal: '#34d9c3', alarm: '#ff5a66', ok: '#58d18a',
-  zones: ['#ffb454', '#f2789f', '#8ecbff', '#b7a5ff', '#7ee0a3', '#ffd97a'],
+  harbor: '#EDF0F2', panel: '#FFFFFF', hairline: '#D7DDE6',
+  chalk: '#0E1B2C', slate: '#54657D', slateDim: '#8C99AB',
+  amber: '#D77E00', teal: '#1F49E0', alarm: '#CC3D4E', ok: '#188A57',
+  zones: ['#D77E00', '#B8447E', '#1F49E0', '#6A3FC0', '#188A57', '#8A6D1B'],
 }
 
 export const axisBase = {
   axisLine: { lineStyle: { color: C.hairline } },
   axisLabel: { color: C.slate, fontFamily: 'IBM Plex Mono', fontSize: 11 },
-  splitLine: { lineStyle: { color: 'rgba(38,51,79,0.5)' } },
+  splitLine: { lineStyle: { color: 'rgba(215,221,230,0.7)' } },
   axisTick: { show: false },
 }
 
 export const tooltipBase = {
   trigger: 'axis',
-  backgroundColor: '#182543',
+  backgroundColor: '#FFFFFF',
   borderColor: C.hairline,
   textStyle: { color: C.chalk, fontFamily: 'IBM Plex Mono', fontSize: 12 },
   axisPointer: { type: 'line', lineStyle: { color: C.slateDim } },
+  extraCssText: 'box-shadow: 0 6px 24px rgba(14,27,44,.12); border-radius: 8px;',
 }
 
 export function Chart({ option, className = 'chart' }) {

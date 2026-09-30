@@ -36,7 +36,7 @@ function priceColor(p, lo, hi) {
   if (p == null || hi === lo) return C.slate
   const t = Math.max(0, Math.min(1, (p - lo) / (hi - lo)))
   // teal -> amber -> alarm
-  const stops = [[52, 217, 195], [255, 180, 84], [255, 90, 102]]
+  const stops = [[31, 73, 224], [215, 126, 0], [204, 61, 78]]
   const seg = t < 0.5 ? [stops[0], stops[1]] : [stops[1], stops[2]]
   const k = t < 0.5 ? t * 2 : (t - 0.5) * 2
   const c = seg[0].map((a, i) => Math.round(a + (seg[1][i] - a) * k))
@@ -94,9 +94,9 @@ export default function ItalyMap({ dash }) {
               style={{ cursor: 'pointer' }}>
               <path d={cfg.path} fill={fill} fillOpacity={on ? 0.85 : 0.62}
                 stroke={on ? C.chalk : C.hairline} strokeWidth={on ? 2 : 1.2} />
-              <text x={cfg.cx} y={cfg.cy - 2} fill="#0d1424" fontSize="12" fontWeight="700"
+              <text x={cfg.cx} y={cfg.cy - 2} fill="#FFFFFF" fontSize="12" fontWeight="700"
                 textAnchor="middle" fontFamily="Space Grotesk">{cfg.label}</text>
-              <text x={cfg.cx} y={cfg.cy + 12} fill="#0d1424" fontSize="10"
+              <text x={cfg.cx} y={cfg.cy + 12} fill="#FFFFFF" fontSize="10"
                 textAnchor="middle" fontFamily="IBM Plex Mono">
                 {p != null ? `${p.toFixed(0)}€` : '—'}
               </text>
