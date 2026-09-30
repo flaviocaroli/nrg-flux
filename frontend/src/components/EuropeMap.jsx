@@ -11,8 +11,8 @@ import { C } from './Chart'
  * CNOR = Tuscany/Umbria/Marche, CSUD = Lazio/Abruzzo/Campania,
  * SUD = Molise/Puglia/Basilicata/Calabria, plus the two islands).
  *
- * Colour = day-ahead price heat. Dashed outline = market not backfilled yet
- * (run scripts/backfill_eu.py). Arrows = live physical flows.
+ * Colour = day-ahead price heat. Dashed outline = market data unavailable.
+ * Arrows = live physical flows.
  */
 
 // ---- projection -----------------------------------------------------------

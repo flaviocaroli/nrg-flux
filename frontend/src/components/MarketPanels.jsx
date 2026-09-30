@@ -68,17 +68,6 @@ function priceChart(priceFc, priceAct) {
   }
 }
 
-const badge = (fc) => fc && (
-  <span className={`skill-badge ${fc.beats_naive_baseline ? 'good' : 'bad'}`}>
-    {fc.beats_naive_baseline
-      ? `beats naive${fc.skill_vs_best_naive_pct != null ? ` · +${fc.skill_vs_best_naive_pct}%` : ''}`
-      : 'does not beat naive'}
-  </span>
-)
-const cov = (fc) => fc?.coverage?.achieved_pct != null && (
-  <span className="tag">coverage {fc.coverage.achieved_pct}% / {fc.coverage.target_pct}%</span>
-)
-
 function CountryBlock({ market }) {
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(true)
@@ -121,38 +110,30 @@ function CountryBlock({ market }) {
           <h2>Load forecast
             {data?.loadFc && <span className="tag">{data.loadFc.training_source === 'synthetic'
               ? '⚠ synthetic' : `trained on ${data.loadFc.training_source || 'n/a'}`}</span>}
-            {cov(data?.loadFc)}
-            {badge(data?.loadFc)}
           </h2>
           {data && !data.loadFc && (
             <div className="train-hint">
-              No load model for {market.name} yet — showing actual load only.<br />
-              <code>python3 scripts/train_forecast.py --area {market.national_eic}</code>
+              Demand forecast is temporarily unavailable. Showing actual load where available.
             </div>
           )}
           {lo ? <Chart option={lo} /> : !busy && (
             <div className="empty-note">
-              No load data for {market.name}.<br />
-              <code>python3 scripts/backfill_eu.py --markets {market.country}</code>
+              No load data is currently available for {market.name}.
             </div>
           )}
         </div>
 
         <div className="panel">
           <h2>Price forecast · {zoneLabel}
-            {cov(data?.priceFc)}
-            {badge(data?.priceFc)}
           </h2>
           {data && !data.priceFc && (
             <div className="train-hint">
-              No price model for {zoneLabel} yet — showing actual prices only.<br />
-              <code>python3 scripts/train_price_forecast.py --area {market.zones[0].eic}</code>
+              Price forecast is temporarily unavailable. Showing day-ahead prices where available.
             </div>
           )}
           {po ? <Chart option={po} /> : !busy && (
             <div className="empty-note">
-              No price data for {market.name}.<br />
-              <code>python3 scripts/backfill_eu.py --markets {market.country}</code>
+              No price data is currently available for {market.name}.
             </div>
           )}
         </div>
