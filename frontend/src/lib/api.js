@@ -16,7 +16,12 @@ export const api = {
   explain: (area) => get(`/v1/forecast/explain${area ? `?area=${encodeURIComponent(area)}` : ''}`),
   loadActual: (area, hours = 96) =>
     get(`/v1/load/actual?area=${encodeURIComponent(area)}`),
-  pricesFor: (area) => get(`/v1/prices/dayahead?area=${encodeURIComponent(area)}`),
+  pricesFor: (area, start, end) => {
+    const params = new URLSearchParams({ area })
+    if (start) params.set('start', start)
+    if (end) params.set('end', end)
+    return get(`/v1/prices/dayahead?${params.toString()}`)
+  },
   weather: (area) => get(`/v1/weather/history?area=${encodeURIComponent(area)}`),
   tsoForecast: (area = '10YIT-GRTN-----B') =>
     get(`/v1/load/forecast/tso?area=${encodeURIComponent(area)}`),

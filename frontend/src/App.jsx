@@ -6,6 +6,7 @@ import ItalyMap from './components/ItalyMap'
 import EuropeMap from './components/EuropeMap'
 import DataCatalog from './components/DataCatalog'
 import MarketPanels from './components/MarketPanels'
+import ProfileCostPanel from './components/ProfileCostPanel'
 
 const fmtHour = (iso) =>
   new Date(iso).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })
@@ -201,6 +202,10 @@ export default function App() {
           <div className="sub">{kpis.nOut} validated events shown</div>
         </div>
       </section>
+
+      <div className="section-rule"><span>Turn a load profile into a benchmark</span></div>
+
+      <ProfileCostPanel />
 
       <div className="grid">
         <div className="panel">

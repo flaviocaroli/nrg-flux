@@ -323,6 +323,41 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
   padding: 2px 7px; border-radius: 4px; font-size: 10.5px; border: 1px solid var(--hairline);
 }
 
+/* ---------------- profile-to-cost benchmark ---------------- */
+.profile-cost { margin-bottom: 14px; }
+.profile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.profile-head p { margin-top: 7px; max-width: 760px; color: var(--slate); font-size: 13px; }
+.profile-controls { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.profile-controls label { display: grid; gap: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--slate); letter-spacing: .08em; text-transform: uppercase; }
+.profile-controls select, .profile-controls input { min-height: 34px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--panel); color: var(--ink); padding: 6px 9px; font: 12px var(--font-mono); }
+.profile-controls input { max-width: 260px; padding: 4px; }
+.pc-button { min-height: 34px; border: 1px solid var(--cobalt); border-radius: 6px; background: var(--cobalt); color: white; cursor: pointer; padding: 7px 11px; font: 11px var(--font-mono); }
+.pc-button:hover:not(:disabled) { filter: brightness(.94); }
+.pc-button:disabled { opacity: .55; cursor: wait; }
+.pc-button.secondary { background: var(--panel); border-color: var(--hairline); color: var(--slate); }
+.pc-button.secondary:hover:not(:disabled) { border-color: var(--cobalt); color: var(--cobalt); }
+.profile-file, .profile-note, .profile-errors { margin-top: 12px; padding: 10px 12px; border-radius: 7px; font: 11.5px/1.55 var(--font-mono); }
+.profile-file { color: var(--slate); background: var(--panel-raised); }
+.profile-note { color: var(--ok); background: rgba(24,138,87,.07); border: 1px solid rgba(24,138,87,.28); }
+.profile-errors { color: #9c2635; background: rgba(204,61,78,.07); border: 1px solid rgba(204,61,78,.3); }
+.profile-errors ul { margin: 6px 0 0 18px; }
+.profile-report { margin-top: 18px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+.profile-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.profile-kpis > div { border: 1px solid var(--hairline); border-radius: 8px; padding: 11px; background: var(--panel-raised); }
+.profile-kpis span { display: block; color: var(--slate); font: 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.profile-kpis b { display: block; margin-top: 6px; color: var(--ink); font: 600 18px var(--font-mono); font-variant-numeric: tabular-nums; }
+.profile-kpis small { color: var(--slate); font-size: 11px; font-weight: 400; }
+.profile-report-head { display: flex; justify-content: space-between; gap: 14px; align-items: center; margin-top: 16px; color: var(--slate); font: 11px/1.55 var(--font-mono); }
+.profile-disclaimer { margin: 13px 0; color: var(--slate); font-size: 12px; }
+.profile-report h3 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--slate); }
+.profile-table-wrap { overflow-x: auto; }
+.profile-table { width: 100%; border-collapse: collapse; margin-top: 8px; font: 11.5px var(--font-mono); }
+.profile-table th { text-align: left; color: var(--slate-dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 7px 8px; border-bottom: 1px solid var(--hairline); }
+.profile-table td { padding: 8px; border-bottom: 1px solid rgba(215,221,230,.65); font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .profile-kpis { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .profile-head, .profile-report-head { flex-direction: column; } .profile-controls input { max-width: 100%; } }
+@media print { .no-print, .profile-controls, .profile-head > .pc-button, .ticker, .pulse-rule, .section-rule, .masthead, .kpis, .grid, .country-stack, .catalog, .foot { display: none !important; } body { background: #fff; } .shell { max-width: none; padding: 0; } .profile-cost { border: none; box-shadow: none; } }
+
 /* ---- Multi-market: all four countries at once ---- */
 .country-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
 .country-block { border-top: 1px solid var(--hairline); padding-top: 12px; }
