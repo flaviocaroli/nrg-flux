@@ -21,6 +21,7 @@ export default function App() {
   const [err, setErr] = useState(null)
   const [explHour, setExplHour] = useState(19)
   const [gridView, setGridView] = useState('eu')  // 'eu' | 'map' | 'schematic'
+  const [selectedMarket, setSelectedMarket] = useState('IT')
 
   useEffect(() => {
     const load = () => {
@@ -153,7 +154,7 @@ export default function App() {
       <header className="masthead">
         <span className="brand">NRG<b>-FLUX</b></span>
         <h1>Europe Grid Pulse
-          <small>day-ahead markets · calibrated forecasts · IT · FR · DE · CH</small>
+          <small>11 European markets · Italy reference market · auditable forecasts</small>
         </h1>
         <div className="meta">
           <span>{new Date(dash.generated_at_utc).toUTCString().replace('GMT', 'UTC')}</span>
@@ -226,7 +227,8 @@ export default function App() {
               <button className={gridView === 'schematic' ? 'on' : ''} onClick={() => setGridView('schematic')}>schematic</button>
             </span>
           </h2>
-          {gridView === 'eu' ? <EuropeMap dash={dash} markets={dash.markets || {}} />
+          {gridView === 'eu' ? <EuropeMap dash={dash} markets={dash.markets || {}}
+              selectedCountry={selectedMarket} onSelect={setSelectedMarket} />
             : gridView === 'map' ? <ItalyMap dash={dash} />
             : <ZoneSchematic flows={dash.flows_now} prices={dash.prices} />}
         </div>
@@ -259,9 +261,9 @@ export default function App() {
         </div>
       </div>
 
-      <div className="section-rule"><span>All markets · load &amp; price forecasts</span></div>
+      <div className="section-rule"><span>European market explorer · load &amp; price forecasts</span></div>
 
-      <MarketPanels />
+      <MarketPanels selectedCountry={selectedMarket} onSelect={setSelectedMarket} />
 
       <div className="section-rule"><span>What you can download</span></div>
 
@@ -282,7 +284,7 @@ export default function App() {
           )}
         </div>
         <div className="panel" style={{ overflowX: 'auto' }}>
-          <h2>Active generation unavailability <span className="tag">validated only</span></h2>
+          <h2>Largest unavailabilities <span className="tag">generation + grid</span></h2>
           <table className="outages">
             <thead>
               <tr><th>Asset</th><th>Zone</th><th>Type</th><th style={{ textAlign: 'right' }}>MW</th></tr>
@@ -290,7 +292,7 @@ export default function App() {
             <tbody>
               {dash.outages.length === 0 && (
                 <tr><td colSpan="4" style={{ color: 'var(--slate)', padding: '28px 10px', textAlign: 'center' }}>
-                  No validated active generation outages are available.
+                  No active validated generation-outage records are currently available.
                 </td></tr>
               )}
               {dash.outages.slice(0, 7).map((o) => (

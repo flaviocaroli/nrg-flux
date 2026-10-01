@@ -24,13 +24,20 @@ const COUNTRIES = {
   FR: { name: 'France',      load: '10YFR-RTE------C', price: '10YFR-RTE------C', imp: ['10Y1001A1001A82H', '10YFR-RTE------C'] },
   DE: { name: 'Germany',     load: '10Y1001A1001A83F', price: '10Y1001A1001A82H', imp: ['10YFR-RTE------C', '10Y1001A1001A82H'] },
   CH: { name: 'Switzerland', load: '10YCH-SWISSGRIDZ', price: '10YCH-SWISSGRIDZ', imp: ['10YFR-RTE------C', '10YCH-SWISSGRIDZ'] },
+  AT: { name: 'Austria',     load: '10YAT-APG------L', price: '10YAT-APG------L', imp: ['10Y1001A1001A82H', '10YAT-APG------L'] },
+  SI: { name: 'Slovenia',    load: '10YSI-ELES-----O', price: '10YSI-ELES-----O', imp: ['10YAT-APG------L', '10YSI-ELES-----O'] },
+  GR: { name: 'Greece',      load: '10YGR-HTSO-----Y', price: '10YGR-HTSO-----Y', imp: ['10Y1001A1001A788', '10YGR-HTSO-----Y'] },
+  BE: { name: 'Belgium',     load: '10YBE----------2', price: '10YBE----------2', imp: ['10YFR-RTE------C', '10YBE----------2'] },
+  NL: { name: 'Netherlands', load: '10YNL----------L', price: '10YNL----------L', imp: ['10Y1001A1001A82H', '10YNL----------L'] },
+  ES: { name: 'Spain',       load: '10YES-REE------0', price: '10YES-REE------0', imp: ['10YFR-RTE------C', '10YES-REE------0'] },
+  GB: { name: 'Great Britain', load: '10YGB----------A', price: null, imp: ['10YFR-RTE------C', '10YGB----------A'] },
 }
 
 function datasetsFor(cc) {
   const c = COUNTRIES[cc]
   const [impFrom, impTo] = c.imp
   return [
-    { id: 'prices', name: 'Day-ahead prices', path: `/v1/prices/dayahead?area=${c.price}`,
+    c.price && { id: 'prices', name: 'Day-ahead prices', path: `/v1/prices/dayahead?area=${c.price}`,
       key: 'series', unit: '€/MWh', src: 'ENTSO-E A44', cadence: 'daily ~12:45 CET', color: C.amber },
     { id: 'load', name: 'Actual load', path: `/v1/load/actual?area=${c.load}`,
       key: 'series', unit: 'MW', src: 'ENTSO-E A65', cadence: 'hourly', color: C.chalk },
@@ -40,7 +47,7 @@ function datasetsFor(cc) {
       key: 'series', unit: '°C', src: 'ERA5 (Copernicus/Open-Meteo)', cadence: 'hourly history', color: C.ok },
     { id: 'fcload', name: 'Load forecast (ours)', path: `/v1/forecast/load?horizon=168&area=${c.load}`,
       key: 'forecast', unit: 'MW p10/p50/p90', src: 'NRG-Flux ML', cadence: 'after each run', color: C.teal },
-    { id: 'fcprice', name: 'Price forecast (ours)', path: `/v1/forecast/price?horizon=48&area=${c.price}`,
+    c.price && { id: 'fcprice', name: 'Price forecast (ours)', path: `/v1/forecast/price?horizon=48&area=${c.price}`,
       key: 'forecast', unit: '€/MWh p10/p50/p90', src: 'NRG-Flux ML', cadence: 'after each run', color: C.teal },
     { id: 'explain', name: 'Forecast drivers (SHAP)', path: `/v1/forecast/explain?area=${c.load}`,
       key: 'points', unit: 'MW per driver', src: 'NRG-Flux ML', cadence: 'per forecast', color: C.teal },
@@ -48,7 +55,7 @@ function datasetsFor(cc) {
       key: 'series', unit: 'MW', src: 'ENTSO-E A11', cadence: 'hourly', color: C.ok },
     { id: 'outages', name: 'Outages', path: `/v1/outages?area=${c.load}`,
       key: 'series', unit: 'MW unavailable', src: 'ENTSO-E A80/A78', cadence: 'on publication', color: C.alarm },
-  ]
+  ].filter(Boolean)
 }
 
 function toCSV(rows) {
@@ -153,7 +160,7 @@ export default function DataCatalog() {
       <div className="catalog-foot">
         Every row ships with UTC + market-day timestamps, units, lineage (source ·
         document type · parser version) and quality flags. Same data via API, Excel
-        (Power Query) or these CSV exports — for IT, FR, DE and CH.
+        (Power Query) or these CSV exports across the 11 configured markets.
       </div>
     </div>
   )

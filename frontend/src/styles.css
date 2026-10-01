@@ -373,6 +373,44 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
 .grid.grid-even { grid-template-columns: 1fr 1fr; }
 @media (max-width: 900px) { .grid.grid-even { grid-template-columns: 1fr; } }
 
+/* ---- Europe market explorer ---- */
+.market-overview { margin-bottom: 4px; padding: 15px 17px; }
+.market-overview-copy { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.market-overview-copy strong {
+  font-family: var(--font-display); font-size: 15px; color: var(--ink);
+}
+.market-overview-copy span {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--slate-dim);
+}
+.market-stats {
+  display: flex; gap: 9px; flex-wrap: wrap; margin: 12px 0;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--slate);
+}
+.market-stats span {
+  border: 1px solid var(--hairline); border-radius: 6px; padding: 5px 9px;
+  background: var(--panel-raised);
+}
+.market-stats b { color: var(--cobalt); font-size: 12px; }
+.market-overview .market-bar { margin-bottom: 8px; }
+.market-state, .market-key i {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none;
+}
+.market-state.model, .market-key i.model { background: var(--ok); }
+.market-state.data, .market-key i.data { background: var(--cobalt); }
+.market-state.partial, .market-key i.partial { background: var(--amber); }
+.market-key {
+  display: flex; gap: 15px; flex-wrap: wrap; font-family: var(--font-mono);
+  font-size: 9.5px; color: var(--slate-dim);
+}
+.market-key span { display: inline-flex; align-items: center; gap: 5px; }
+.eu-map g[role="button"]:focus { outline: none; }
+.eu-map g[role="button"]:focus path { filter: drop-shadow(0 0 3px rgba(31,73,224,.65)); }
+@media (max-width: 640px) {
+  .market-overview { padding: 12px; }
+  .market-chip { padding: 5px 9px; }
+  .country-head { flex-wrap: wrap; }
+}
+
 /* ---- Data catalog: market selector ---- */
 .catalog-country {
   display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
