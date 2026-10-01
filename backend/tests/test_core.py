@@ -5,7 +5,7 @@ Includes the DST "golden tests" the plan makes a hard gate:
 Run: cd backend && python -m pytest tests/ -q
 """
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -356,6 +356,17 @@ def test_eu_markets_reference_known_eics():
             if z not in known:
                 missing.append((cc, z))
     assert not missing, f"markets reference unseeded EICs: {missing}"
+
+
+def test_neso_utc_bounds_accept_aware_and_naive_datetimes():
+    from app.ingestion.neso import _utc_timestamp
+
+    naive = _utc_timestamp(datetime(2026, 1, 1, 12, 0))
+    aware = _utc_timestamp(datetime(2026, 1, 1, 13, 0,
+                                    tzinfo=timezone(timedelta(hours=1))))
+
+    assert naive.isoformat() == "2026-01-01T12:00:00+00:00"
+    assert aware.isoformat() == "2026-01-01T12:00:00+00:00"
 
 
 def test_europe_expansion_markets_have_weather_centroids():

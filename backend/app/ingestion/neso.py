@@ -42,6 +42,12 @@ HISTORIC_DEMAND_RESOURCES = {
 }
 
 
+def _utc_timestamp(value: datetime) -> pd.Timestamp:
+    """Return a UTC timestamp whether ``value`` is naive or timezone-aware."""
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 class NesoClient:
     def __init__(self, api_key: str | None = None):
         s = get_settings()
@@ -118,5 +124,6 @@ class NesoClient:
                .sort_index()
                .resample("h").mean()
                .dropna())
-        return ser[(ser.index >= pd.Timestamp(start, tz="UTC")) &
-                   (ser.index < pd.Timestamp(end, tz="UTC"))]
+        start_utc = _utc_timestamp(start)
+        end_utc = _utc_timestamp(end)
+        return ser[(ser.index >= start_utc) & (ser.index < end_utc)]
