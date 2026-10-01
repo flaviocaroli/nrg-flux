@@ -65,9 +65,26 @@ def iter_windows(start: datetime, end: datetime, chunk_days: int):
 def check_database():
     db = SessionLocal()
     try:
+        checkpoint = db.execute(text("PRAGMA wal_checkpoint(FULL)")).one()
+        if checkpoint[0] != 0:
+            raise RuntimeError(f"SQLite WAL checkpoint was busy: {checkpoint}")
         result = [row[0] for row in db.execute(text("PRAGMA quick_check(1)"))]
         if result != ["ok"]:
             raise RuntimeError("SQLite quick_check failed: " + " | ".join(result))
+    finally:
+        db.close()
+
+
+def configure_database():
+    db = SessionLocal()
+    try:
+        journal_mode = db.execute(text("PRAGMA journal_mode=WAL")).scalar_one()
+        db.execute(text("PRAGMA synchronous=FULL"))
+        db.execute(text("PRAGMA busy_timeout=30000"))
+        print(
+            f"SQLite: journal_mode={journal_mode}, synchronous=FULL",
+            flush=True,
+        )
     finally:
         db.close()
 
@@ -91,7 +108,14 @@ def seed_eic_codes():
         db.close()
 
 
-def ingest_window(client, start: datetime, end: datetime, include_future_outages: bool):
+def ingest_window(
+    client,
+    start: datetime,
+    end: datetime,
+    include_future_outages: bool,
+    store_raw_documents: bool,
+    ingest_outages: bool,
+):
     db = SessionLocal()
     national = "10YIT-GRTN-----B"
 
@@ -101,12 +125,13 @@ def ingest_window(client, start: datetime, end: datetime, include_future_outages
             for batch, (xml, rows) in enumerate(
                 client.dayahead_prices(zone, start, end), start=1
             ):
-                db.add(RawDocument(
-                    source="entsoe",
-                    query=f"A44 {zone}",
-                    document_type="A44",
-                    payload=xml,
-                ))
+                if store_raw_documents:
+                    db.add(RawDocument(
+                        source="entsoe",
+                        query=f"A44 {zone}",
+                        document_type="A44",
+                        payload=xml,
+                    ))
                 for row in rows:
                     upsert(db, PriceDayAhead, dict(
                         area_eic=zone,
@@ -124,12 +149,13 @@ def ingest_window(client, start: datetime, end: datetime, include_future_outages
             for batch, (xml, rows) in enumerate(
                 client.actual_load(area, start, end), start=1
             ):
-                db.add(RawDocument(
-                    source="entsoe",
-                    query=f"A65/A16 {area}",
-                    document_type="A65",
-                    payload=xml,
-                ))
+                if store_raw_documents:
+                    db.add(RawDocument(
+                        source="entsoe",
+                        query=f"A65/A16 {area}",
+                        document_type="A65",
+                        payload=xml,
+                    ))
                 for row in rows:
                     upsert(db, LoadActual, dict(
                         area_eic=area,
@@ -172,6 +198,10 @@ def ingest_window(client, start: datetime, end: datetime, include_future_outages
                 commit_batch(db, f"flows {label} batch {batch}")
                 print(f"    batch {batch}: {len(rows)} rows", flush=True)
 
+        if not ingest_outages:
+            print("  outages skipped for historical training backfill", flush=True)
+            return
+
         outage_end = end + timedelta(days=30) if include_future_outages else end
 
         print("  outages generation (A80)", flush=True)
@@ -179,13 +209,14 @@ def ingest_window(client, start: datetime, end: datetime, include_future_outages
             for batch, (xmls, rows) in enumerate(
                 client.outages(national, start, outage_end, doc_type="A80"), start=1
             ):
-                for xml in xmls:
-                    db.add(RawDocument(
-                        source="entsoe",
-                        query=f"A80 {national}",
-                        document_type="A80",
-                        payload=xml,
-                    ))
+                if store_raw_documents:
+                    for xml in xmls:
+                        db.add(RawDocument(
+                            source="entsoe",
+                            query=f"A80 {national}",
+                            document_type="A80",
+                            payload=xml,
+                        ))
                 for row in rows:
                     row.pop("revision", None)
                     row.pop("created", None)
@@ -212,13 +243,14 @@ def ingest_window(client, start: datetime, end: datetime, include_future_outages
                     ),
                     start=1,
                 ):
-                    for xml in xmls:
-                        db.add(RawDocument(
-                            source="entsoe",
-                            query=f"A78 {label}",
-                            document_type="A78",
-                            payload=xml,
-                        ))
+                    if store_raw_documents:
+                        for xml in xmls:
+                            db.add(RawDocument(
+                                source="entsoe",
+                                query=f"A78 {label}",
+                                document_type="A78",
+                                payload=xml,
+                            ))
                     for row in rows:
                         row.pop("revision", None)
                         row.pop("created", None)
@@ -248,6 +280,16 @@ def main():
         action="store_true",
         help="clear the outages table before ingestion",
     )
+    parser.add_argument(
+        "--skip-outages",
+        action="store_true",
+        help="skip outage ingestion for historical model-training backfills",
+    )
+    parser.add_argument(
+        "--skip-raw-documents",
+        action="store_true",
+        help="store normalized rows without duplicating large historical XML payloads",
+    )
     args = parser.parse_args()
 
     if args.chunk_days < 1 or args.days < 1:
@@ -272,6 +314,7 @@ def main():
         parser.error("start must be earlier than end")
 
     init_db()
+    configure_database()
     seed_eic_codes()
 
     if args.reset_outages:
@@ -292,6 +335,12 @@ def main():
         f"{overall_end.isoformat()} in {total} window(s) ...",
         flush=True,
     )
+    print(
+        "Mode: "
+        f"outages={'off' if args.skip_outages else 'on'}, "
+        f"raw_documents={'off' if args.skip_raw_documents else 'on'}",
+        flush=True,
+    )
 
     try:
         for index, (start, end) in enumerate(windows, start=1):
@@ -301,7 +350,14 @@ def main():
                 f"{start.isoformat()} -> {end.isoformat()}",
                 flush=True,
             )
-            ingest_window(client, start, end, include_future_outages=index == total)
+            ingest_window(
+                client,
+                start,
+                end,
+                include_future_outages=index == total,
+                store_raw_documents=not args.skip_raw_documents,
+                ingest_outages=not args.skip_outages,
+            )
             check_database()
             print(f"[{index}/{total}] checkpoint integrity: ok", flush=True)
     except KeyboardInterrupt:
