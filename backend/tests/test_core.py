@@ -357,6 +357,20 @@ def test_eu_markets_reference_known_eics():
                 missing.append((cc, z))
     assert not missing, f"markets reference unseeded EICs: {missing}"
 
+
+def test_europe_expansion_markets_have_weather_centroids():
+    """Every configured expansion market must be trainable with real weather."""
+    from app.utils.eic import EU_MARKETS, ZONE_CENTROIDS
+
+    expected = {
+        "BE": "10YBE----------2",
+        "SI": "10YSI-ELES-----O",
+        "GR": "10YGR-HTSO-----Y",
+    }
+    for country, national_eic in expected.items():
+        assert EU_MARKETS[country]["national"] == national_eic
+        assert national_eic in ZONE_CENTROIDS
+
 # --------------------------------------------------- scheduler time math
 # The scheduler must fire at 13:05 Europe/Rome regardless of DST — these are
 # golden tests in the same spirit as the market-day DST gate above.

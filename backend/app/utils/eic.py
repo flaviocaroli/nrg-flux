@@ -118,11 +118,29 @@ EU_MARKETS: dict[str, dict] = {
         "zones": ["10YES-REE------0"],
         "tz": "Europe/Madrid", "currency": "EUR",
     },
+    "BE": {
+        "name": "Belgium",
+        "national": "10YBE----------2",
+        "zones": ["10YBE----------2"],
+        "tz": "Europe/Brussels", "currency": "EUR",
+    },
     "AT": {
         "name": "Austria",
         "national": "10YAT-APG------L",
         "zones": ["10YAT-APG------L"],
         "tz": "Europe/Vienna", "currency": "EUR",
+    },
+    "SI": {
+        "name": "Slovenia",
+        "national": "10YSI-ELES-----O",
+        "zones": ["10YSI-ELES-----O"],
+        "tz": "Europe/Ljubljana", "currency": "EUR",
+    },
+    "GR": {
+        "name": "Greece",
+        "national": "10YGR-HTSO-----Y",
+        "zones": ["10YGR-HTSO-----Y"],
+        "tz": "Europe/Athens", "currency": "EUR",
     },
     "NL": {
         "name": "Netherlands",
@@ -165,8 +183,14 @@ EU_BORDERS: dict[str, list[tuple[str, str, str]]] = {
            ("10YPT-REN------W", "10YES-REE------0", "PT → ES")],
     "AT": [("10Y1001A1001A82H", "10YAT-APG------L", "DE → AT"),
            ("10YCH-SWISSGRIDZ", "10YAT-APG------L", "CH → AT")],
+    "SI": [("10YAT-APG------L", "10YSI-ELES-----O", "AT → SI"),
+           ("10Y1001A1001A73I", "10YSI-ELES-----O", "IT-North → SI")],
+    "GR": [("10Y1001A1001A788", "10YGR-HTSO-----Y", "IT-South → GR")],
     "NL": [("10Y1001A1001A82H", "10YNL----------L", "DE → NL"),
            ("10YBE----------2", "10YNL----------L", "BE → NL")],
+    "BE": [("10YFR-RTE------C", "10YBE----------2", "FR → BE"),
+           ("10YNL----------L", "10YBE----------2", "NL → BE"),
+           ("10YGB----------A", "10YBE----------2", "GB → BE")],
 }
 
 
@@ -205,7 +229,10 @@ ZONE_CENTROIDS: dict[str, tuple[float, float]] = {
     "10Y1001A1001A83F": (51.2, 10.4),
     "10YCH-SWISSGRIDZ": (46.8, 8.2),    # Switzerland
     "10YES-REE------0": (40.3, -3.7),   # Spain
+    "10YBE----------2": (50.8, 4.5),    # Belgium
     "10YAT-APG------L": (47.6, 14.1),   # Austria
+    "10YSI-ELES-----O": (46.2, 15.0),   # Slovenia
+    "10YGR-HTSO-----Y": (39.1, 22.0),   # Greece
     "10YNL----------L": (52.2, 5.3),    # Netherlands
     "10Y1001A1001A73I": (45.4, 9.9),   # NORD  (Po valley, Milan-centric weighting)
     "10Y1001A1001A70O": (43.5, 11.0),  # CNOR  (Florence)
