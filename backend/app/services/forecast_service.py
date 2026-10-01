@@ -11,6 +11,7 @@ from ..config import get_settings
 from ..db.models import (ForecastExplanation, ForecastLoad, LoadActual,
                          SessionLocal)
 from ..forecasting.model import MODEL_VERSION, LoadForecaster
+from ..forecasting.resolution import to_hourly_mean
 from ..utils.timeutils import iso
 
 
@@ -21,7 +22,8 @@ def _history_from_db(db: Session, area: str, days: int = 30) -> pd.Series:
                       .order_by(LoadActual.ts_utc)).scalars().all()
     idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
                             if r.ts_utc.tzinfo is None else r.ts_utc for r in rows], tz="UTC")
-    return pd.Series([r.load_mw for r in rows], index=idx).sort_index()
+    raw = pd.Series([r.load_mw for r in rows], index=idx).sort_index()
+    return to_hourly_mean(raw)
 
 
 def _temperature_forecast(area: str, start: datetime, hours: int) -> pd.Series:
@@ -114,7 +116,8 @@ def _price_history_from_db(db: Session, area: str, days: int = 60) -> pd.Series:
     idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
                             if r.ts_utc.tzinfo is None else r.ts_utc
                             for r in rows], tz="UTC")
-    return pd.Series([r.price_eur_mwh for r in rows], index=idx).sort_index()
+    raw = pd.Series([r.price_eur_mwh for r in rows], index=idx).sort_index()
+    return to_hourly_mean(raw)
 
 
 def _load_forecast_series(db: Session, area_national: str) -> pd.Series:
@@ -150,7 +153,7 @@ def _tso_forecast_forward(db: Session, area: str) -> pd.Series:
                             if r.ts_utc.tzinfo is None else r.ts_utc
                             for r in rows], tz="UTC")
     s = pd.Series([r.forecast_mw for r in rows], index=idx).sort_index()
-    return s[~s.index.duplicated(keep="last")]
+    return to_hourly_mean(s)
 
 
 def _gas_series(db: Session) -> pd.Series:

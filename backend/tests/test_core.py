@@ -517,3 +517,51 @@ def test_neso_historic_resource_years_are_mapped_correctly():
     assert '2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5"' in source
     assert '2025: "b2bde559-3455-4021-b179-dfe60c0337b0"' in source
     assert '2024: "f6d02c0f-957b-48cb-82ee-09003f2ba759"' in source
+
+def test_to_hourly_mean_aggregates_quarter_hour_values():
+    import pandas as pd
+
+    from app.forecasting.resolution import to_hourly_mean
+
+    index = pd.date_range("2026-01-01T00:00:00Z", periods=8, freq="15min")
+    source = pd.Series([100, 200, 300, 400, 500, 600, 700, 800], index=index)
+    hourly = to_hourly_mean(source)
+
+    assert list(hourly.index) == list(pd.date_range(
+        "2026-01-01T00:00:00Z", periods=2, freq="h"
+    ))
+    assert list(hourly.values) == [250.0, 650.0]
+
+
+def test_to_hourly_mean_preserves_hourly_values_and_last_duplicate():
+    import pandas as pd
+
+    from app.forecasting.resolution import to_hourly_mean
+
+    index = pd.DatetimeIndex([
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T01:00:00Z",
+    ])
+    source = pd.Series([1.0, 2.0, 3.0], index=index)
+
+    hourly = to_hourly_mean(source)
+
+    assert list(hourly.values) == [2.0, 3.0]
+
+
+def test_to_hourly_mean_does_not_fill_long_gaps():
+    import pandas as pd
+
+    from app.forecasting.resolution import to_hourly_mean
+
+    index = pd.DatetimeIndex([
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T05:00:00Z",
+    ])
+    source = pd.Series([10.0, 20.0], index=index)
+
+    hourly = to_hourly_mean(source, interpolate_limit=3)
+
+    assert pd.Timestamp("2026-01-01T03:00:00Z") in hourly.index
+    assert pd.Timestamp("2026-01-01T04:00:00Z") not in hourly.index
