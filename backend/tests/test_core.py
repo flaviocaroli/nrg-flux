@@ -506,3 +506,8 @@ def test_outage_parser_normalises_kw_nominal_to_mw():
     row = parse_unavailability_document(xml)[0]
 
     assert row["unavailable_mw"] == 96.0
+
+def test_neso_2026_resource_id_is_current():
+    source_path = Path(__file__).resolve().parents[1] / "app" / "ingestion" / "neso.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert '2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5"' in source
