@@ -511,3 +511,9 @@ def test_neso_2026_resource_id_is_current():
     source_path = Path(__file__).resolve().parents[1] / "app" / "ingestion" / "neso.py"
     source = source_path.read_text(encoding="utf-8")
     assert '2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5"' in source
+def test_neso_historic_resource_years_are_mapped_correctly():
+    source_path = Path(__file__).resolve().parents[1] / "app" / "ingestion" / "neso.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert '2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5"' in source
+    assert '2025: "b2bde559-3455-4021-b179-dfe60c0337b0"' in source
+    assert '2024: "f6d02c0f-957b-48cb-82ee-09003f2ba759"' in source

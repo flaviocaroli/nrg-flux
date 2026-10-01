@@ -38,7 +38,8 @@ GB_EIC = "10YGB----------A"
 # update if a request returns 404.
 HISTORIC_DEMAND_RESOURCES = {
     2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5",   # historic_demand_data_2026
-    2025: "f6d02c0f-957b-48cb-82ee-09003f2ba759",   # historic_demand_data_2025
+    2025: "b2bde559-3455-4021-b179-dfe60c0337b0",   # historic_demand_data_2025
+    2024: "f6d02c0f-957b-48cb-82ee-09003f2ba759",   # historic_demand_data_2024
 }
 
 
