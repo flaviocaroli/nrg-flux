@@ -36,6 +36,36 @@ The planned evaluation compares, on identical forecast origins and target timest
 
 Until that evaluation is complete, model cards and current holdout results should be described as preliminary development evidence.
 
+## Forecast Arena benchmark
+
+The `italy-models` work adds a saved, reproducible 24-hour comparison for Italy.
+It evaluates weekly seasonal naive, the retrieved ENTSO-E/TSO revision,
+domestic and cumulative five-market LightGBM variants, SARIMAX and a dynamic
+linear model on common timestamps across four rolling origins.
+
+The historical benchmark uses only information available by each D+1 cutoff.
+Observed target-hour weather is excluded, and missing European load or flow
+features are never replaced with zero. TSO results remain `PRELIMINARY` until
+the database preserves immutable publication revisions.
+
+Generate the evidence artifact from the backend directory:
+
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+$env:DATABASE_URL = "sqlite:///C:/Users/hp/nrgflux-data/nrgflux.db"
+python scripts\benchmark_load_models.py --folds 4 --spacing-days 7
+```
+
+The command writes under `backend/models/benchmarks/` atomically. The API only
+serves that saved artifact at:
+
+```text
+GET /v1/forecast/benchmark?area=10YIT-GRTN-----B
+```
+
+The React Forecast Arena reads this endpoint; it does not calculate or select
+headline metrics in the browser.
+
 ## Repository structure
 
 ```text

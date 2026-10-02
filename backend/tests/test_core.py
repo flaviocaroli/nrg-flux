@@ -492,6 +492,42 @@ def test_old_model_cards_fall_back_to_symmetric():
         assert m.scale_lo == m.scale_hi == 0.25
 
 
+def test_issue_time_europe_features_do_not_use_forecast_day_actuals():
+    import numpy as np
+    import pandas as pd
+    from app.forecasting.europe_features import build_issue_time_frame
+
+    idx = pd.date_range("2026-01-01", periods=24 * 20, freq="h", tz="UTC")
+    italy = pd.Series(np.arange(len(idx), dtype=float), index=idx)
+    temp = pd.Series(10.0 + np.arange(len(idx)) / 100.0, index=idx)
+    neighbour_loads = {
+        cc: pd.Series(np.arange(len(idx), dtype=float) + offset, index=idx)
+        for offset, cc in enumerate(("FR", "CH", "AT", "SI", "GR"), start=1000)
+    }
+    flows = {
+        cc: pd.Series(np.arange(len(idx), dtype=float) + offset, index=idx)
+        for offset, cc in enumerate(("FR", "CH", "AT", "SI", "GR"), start=2000)
+    }
+    frame = build_issue_time_frame(italy, temp, neighbour_loads, flows)
+    target = idx[-1]
+    assert frame.loc[target, "load_lag_24h"] == italy.loc[target - pd.Timedelta(hours=24)]
+    expected_mean = italy.loc[target - pd.Timedelta(hours=47):target - pd.Timedelta(hours=24)].mean()
+    assert frame.loc[target, "load_issue_mean_24h"] == expected_mean
+    assert frame.loc[target, "fr_flow_lag_24h"] == flows["FR"].loc[target - pd.Timedelta(hours=24)]
+
+
+def test_forecast_arena_metrics_use_common_rows():
+    import numpy as np
+    import pandas as pd
+    from app.forecasting.evaluation import metrics
+
+    actual = pd.Series([100.0, 200.0, 300.0], index=[0, 1, 2])
+    pred = pd.Series([90.0, np.nan, 330.0], index=[0, 1, 2])
+    result = metrics(actual, pred)
+    assert result["sample_count"] == 2
+    assert result["wape"] == 10.0
+
+
 def test_outage_parser_normalises_kw_nominal_to_mw():
     from app.parsers.entsoe_xml import parse_unavailability_document
 

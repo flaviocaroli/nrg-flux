@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { C, Chart, axisBase, tooltipBase } from './Chart'
+import InfoTip from './InfoTip'
 
 const ORDER = ['IT', 'FR', 'DE', 'CH', 'AT', 'SI', 'GR', 'BE', 'NL', 'ES', 'GB']
 
@@ -104,7 +105,7 @@ function CountryBlock({ market }) {
       <div className="grid grid-even">
         <div className="panel">
           <h2>Load · actual and forecast
-            {data?.loadFc && <span className="tag">D+1..D+7 · p10/p50/p90</span>}
+            {data?.loadFc && <span className="tag">D+1..D+7 · p10/p50/p90</span>}<InfoTip label="About market load forecast">Observed national load is shown with the market's issued P10, P50 and P90 NRG-Flux load forecast when available. The current live regional model uses local calendar, weather forecast and historical load.</InfoTip>
           </h2>
           {data && !data.loadFc && (
             <div className="train-hint">Forecast is not published yet. Verified actual load remains visible.</div>
@@ -116,7 +117,7 @@ function CountryBlock({ market }) {
 
         <div className="panel">
           <h2>Day-ahead price · actual and forecast
-            {data?.priceFc && <span className="tag">48h · p10/p50/p90</span>}
+            {data?.priceFc && <span className="tag">48h · p10/p50/p90</span>}<InfoTip label="About market price forecast">Observed day-ahead wholesale prices and, where trained, the NRG-Flux P10/P50/P90 price forecast. Price forecasting uses historical prices and available demand/fuel drivers; it is not a retail-price quote.</InfoTip>
           </h2>
           {data && !data.priceFc && !noGbPrice && (
             <div className="train-hint">Forecast is not published yet. Verified market prices remain visible.</div>

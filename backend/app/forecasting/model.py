@@ -149,7 +149,6 @@ class LoadForecaster:
                 "conformal_scale": round(self.conformal_scale, 4),
                 "conformal_scale_lo": round(self.scale_lo, 4),
                 "conformal_scale_hi": round(self.scale_hi, 4),
-                "mode": "normalized asymmetric CQR, rolling window (v6)",
                 "mode": "normalized (multiplicative) — scales with local band width",
                 "calibration_hours": int(cal_n),
             },

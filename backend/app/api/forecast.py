@@ -130,6 +130,32 @@ def model_card(area: str | None = None):
     return card
 
 
+@router.get("/benchmark")
+def forecast_benchmark(area: str | None = None):
+    """Return saved, reproducible benchmark evidence; never live-calculated metrics."""
+    from ..forecasting.evaluation import ITALY_AREA, artifact_path
+
+    s = get_settings()
+    area = area or s.forecast_default_area
+    if area != ITALY_AREA:
+        raise HTTPException(404, detail={
+            "error": "benchmark_not_available",
+            "hint": "The audited 24-hour benchmark currently targets Italy national load.",
+        })
+    path = artifact_path(s.model_dir, area)
+    if not path.exists():
+        raise HTTPException(404, detail={
+            "error": "benchmark_not_generated",
+            "hint": "Run scripts/benchmark_load_models.py to create saved evidence.",
+        })
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(503, detail={
+            "error": "benchmark_artifact_invalid", "message": str(exc),
+        }) from exc
+
+
 # ------------------------------------------------------------ price forecast
 
 def _price_card(area: str) -> dict:

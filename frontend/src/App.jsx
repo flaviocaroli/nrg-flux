@@ -7,6 +7,8 @@ import EuropeMap from './components/EuropeMap'
 import DataCatalog from './components/DataCatalog'
 import MarketPanels from './components/MarketPanels'
 import ProfileCostPanel from './components/ProfileCostPanel'
+import ForecastBenchmarkPanel from './components/ForecastBenchmarkPanel'
+import InfoTip from './components/InfoTip'
 
 const fmtHour = (iso) =>
   new Date(iso).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })
@@ -189,22 +191,22 @@ export default function App() {
 
       <section className="kpis">
         <div className="kpi amber">
-          <div className="label">Italy six-zone price benchmark · latest hour</div>
+          <div className="label">Italy six-zone price benchmark · latest hour <InfoTip label="About the Italian price benchmark">The latest unweighted average of six Italian zonal day-ahead prices. It is a transparent benchmark, not the official PUN index.</InfoTip></div>
           <div className="value">{kpis.pun.toFixed(2)}<small>€/MWh</small></div>
           <div className="sub">unweighted zonal average · not official PUN</div>
         </div>
         <div className="kpi teal">
-          <div className="label">Italy tomorrow peak load · p50</div>
+          <div className="label">Italy tomorrow peak load · p50 <InfoTip label="About tomorrow peak load">The highest central estimate in the next 24 forecast hours. The band is the model's P10–P90 uncertainty range from the live domestic quantile LightGBM forecast.</InfoTip></div>
           <div className="value">{kpis.peak ? (kpis.peak.mw_p50 / 1000).toFixed(1) : '—'}<small>GW</small></div>
           <div className="sub">{kpis.peak ? `${fmtHour(kpis.peak.ts_utc)} CET · band ${(kpis.peak.mw_p10 / 1000).toFixed(1)}–${(kpis.peak.mw_p90 / 1000).toFixed(1)} GW` : 'forecast temporarily unavailable'}</div>
         </div>
         <div className="kpi">
-          <div className="label">Italy max zonal spread</div>
+          <div className="label">Italy max zonal spread <InfoTip label="About zonal spread">The difference between the highest and lowest latest Italian zonal day-ahead prices. It highlights market separation, not a consumer tariff.</InfoTip></div>
           <div className="value">{kpis.spread.toFixed(2)}<small>€/MWh</small></div>
           <div className="sub">{kpis.hiZone} over {kpis.loZone}</div>
         </div>
         <div className="kpi alarm">
-          <div className="label">Tracked active generation outages</div>
+          <div className="label">Tracked active generation outages <InfoTip label="About tracked outages">Validated currently active generation-unavailability records. This is a monitored subset, not total unavailable Italian capacity.</InfoTip></div>
           <div className="value">{(kpis.outMw / 1000).toFixed(2)}<small>GW</small></div>
           <div className="sub">{kpis.nOut} monitored events · not a national total</div>
         </div>
@@ -216,11 +218,11 @@ export default function App() {
 
       <div className="grid">
         <div className="panel">
-          <h2>Italian day-ahead prices by zone <span className="tag">ENTSO-E A44 · 72h + D+1</span></h2>
+          <h2>Italian day-ahead prices by zone <span className="tag">ENTSO-E A44 · 72h + D+1</span><InfoTip label="About Italian day-ahead prices">Hourly day-ahead market prices for Italian bidding zones from ENTSO-E A44. They are wholesale energy prices and exclude retail margins, network charges and taxes.</InfoTip></h2>
           <Chart option={priceOption} />
         </div>
         <div className="panel">
-          <h2>Zonal grid · live imports <span className="tag">physical flows, MW</span>
+          <h2>Zonal grid · live imports <span className="tag">physical flows, MW</span><InfoTip label="About zonal grid and imports">A geographic or schematic view of current cross-border physical flows. Values describe measured MW transfers, not contractual imports or future forecasts.</InfoTip>
             <span className="view-toggle">
               <button className={gridView === 'eu' ? 'on' : ''} onClick={() => setGridView('eu')}>EU</button>
               <button className={gridView === 'map' ? 'on' : ''} onClick={() => setGridView('map')}>Italy</button>
@@ -237,14 +239,14 @@ export default function App() {
       <div className="grid">
         <div className="panel">
           <h2>Italian load · actual vs forecast
-            <span className="tag">D+1..D+7 · evaluation claims withheld pending audit</span>
+            <span className="tag">live issued forecast · audited comparison below</span><InfoTip label="About Italian load forecast">Black is observed Italian national load. Blue is the live domestic P50 LightGBM forecast; the shaded band is P10–P90. It uses calendar, weather forecast and historical Italian load—not the new European benchmark features yet.</InfoTip>
           </h2>
           {loadOption ? <Chart option={loadOption} className="chart tall" /> : (
             <div className="empty-note">Demand forecast is temporarily unavailable. Market data remains available.</div>
           )}
         </div>
         <div className="panel">
-          <h2>Why demand moves <span className="tag">SHAP · MW per driver</span></h2>
+          <h2>Why demand moves <span className="tag">SHAP · MW per driver</span><InfoTip label="About demand drivers">TreeSHAP decomposes one live LightGBM P50 prediction into feature contributions in MW. It explains the model's calculation; it does not prove that a feature caused demand to change.</InfoTip></h2>
           <div style={{ marginTop: 10, fontFamily: 'IBM Plex Mono', fontSize: 12, color: C.slate }}>
             {driverOption && <>
               {fmtDay(driverOption.__ts)} {fmtHour(driverOption.__ts).slice(-5)} CET ·
@@ -261,6 +263,10 @@ export default function App() {
         </div>
       </div>
 
+      <div className="section-rule"><span>Forecast Arena · reproducible evidence</span></div>
+
+      <ForecastBenchmarkPanel />
+
       <div className="section-rule"><span>European market explorer · load &amp; price forecasts</span></div>
 
       <MarketPanels selectedCountry={selectedMarket} onSelect={setSelectedMarket} />
@@ -268,13 +274,13 @@ export default function App() {
       <div className="section-rule"><span>What you can download</span></div>
 
       <div className="panel" style={{ marginBottom: 14 }}>
-        <h2>Your data catalog <span className="tag">live counts · one-click CSV · same data as the API</span></h2>
+        <h2>Your data catalog <span className="tag">live counts · one-click CSV · same data as the API</span><InfoTip label="About the data catalog">Choose a market, inspect the live response size and export the same source data that the API exposes. Dataset rows retain timestamps, units and source lineage.</InfoTip></h2>
         <DataCatalog />
       </div>
 
       <div className="grid">
         <div className="panel">
-          <h2>Italian cross-border imports · latest hour <span className="tag">A11 physical flows</span></h2>
+          <h2>Italian cross-border imports · latest hour <span className="tag">A11 physical flows</span><InfoTip label="About cross-border imports">Latest ENTSO-E A11 physical-flow observations into Italian zones. A flow is a grid transfer in MW, not an energy-price forecast.</InfoTip></h2>
           {dash.flows_now.length === 0 ? (
             <div style={{ padding: '48px 12px', fontFamily: 'IBM Plex Mono', fontSize: 12.5, color: C.slate, textAlign: 'center' }}>
               No border-flow data is currently available for the latest 48 hours.
@@ -284,7 +290,7 @@ export default function App() {
           )}
         </div>
         <div className="panel" style={{ overflowX: 'auto' }}>
-          <h2>Largest unavailabilities <span className="tag">generation + grid</span></h2>
+          <h2>Largest unavailabilities <span className="tag">generation + grid</span><InfoTip label="About unavailabilities">Largest active generation and transmission records from ENTSO-E outage documents. Generation MW is unavailable capacity; transmission records may describe restrictions without representing national lost generation.</InfoTip></h2>
           <table className="outages">
             <thead>
               <tr><th>Asset</th><th>Zone</th><th>Type</th><th style={{ textAlign: 'right' }}>MW</th></tr>
