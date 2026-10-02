@@ -37,7 +37,7 @@ function loadChart(loadFc, loadAct) {
     { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
       stack: 'b', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
     { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-      stack: 'b', areaStyle: { color: 'rgba(31,73,224,0.10)' },
+      stack: 'b', areaStyle: { color: 'rgba(56,173,164,0.12)' },
       data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
   ] : []
   const option = {
@@ -80,7 +80,7 @@ function priceChart(priceFc, priceAct) {
       { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
         stack: 'pb', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
       { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-        stack: 'pb', areaStyle: { color: 'rgba(215,126,0,0.10)' },
+        stack: 'pb', areaStyle: { color: 'rgba(227,172,53,0.12)' },
         data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
       { name: 'Actual', type: 'line', showSymbol: false, smooth: 0.12,
         lineStyle: { width: 2, color: C.chalk }, itemStyle: { color: C.chalk },

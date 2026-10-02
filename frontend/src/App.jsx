@@ -89,7 +89,7 @@ export default function App() {
       yAxis: { type: 'value', name: 'MW', nameTextStyle: { color: C.slateDim, fontFamily: 'IBM Plex Mono' }, ...axisBase, scale: true },
       series: [
         { name: 'p10–p90 band', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', data: band.map(([t, lo]) => [t, lo]) },
-        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', areaStyle: { color: 'rgba(31,73,224,0.10)' }, data: band.map(([t, lo, hi]) => [t, hi - lo]) },
+        { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 }, stack: 'band', areaStyle: { color: 'rgba(56,173,164,0.12)' }, data: band.map(([t, lo, hi]) => [t, hi - lo]) },
         { name: 'Actual load', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.chalk }, itemStyle: { color: C.chalk }, data: dash.load },
         { name: 'NRG-Flux p50', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.teal }, itemStyle: { color: C.teal }, data: fc.forecast.map((p) => [p.ts_utc, p.mw_p50]) },
         { name: 'TSO day-ahead', type: 'line', showSymbol: false, lineStyle: { width: 1.4, color: C.amber, type: 'dashed' }, itemStyle: { color: C.amber }, data: (tso?.series || []).map((p) => [p.ts_utc, p.value]) },
@@ -155,10 +155,11 @@ export default function App() {
     <div className="shell">
       <header className="masthead">
         <div className="brand-lockup">
-          <img className="brand-mark" src="/nrg-flux-logo.svg" alt="" />
-          <h1>NRG-Flux <span className="region-label">Europe</span>
+          <img className="brand-logo" src="/nrg-flux-logo.svg" alt="NRG Flux" />
+          <div className="brand-copy">
+            <span className="region-label">EUROPE</span>
             <small>11 European markets · Italy reference market · auditable forecasts</small>
-          </h1>
+          </div>
         </div>
         <div className="meta">
           <span>{new Date(dash.generated_at_utc).toUTCString().replace('GMT', 'UTC')}</span>
