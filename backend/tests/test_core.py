@@ -414,6 +414,14 @@ def test_next_half_hour_boundaries():
     assert next_half_hour(t2) == datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc)
 
 
+def test_next_hour_boundaries():
+    from app.utils.scheduling import next_hour
+    t = datetime(2026, 7, 18, 9, 14, 59, tzinfo=timezone.utc)
+    assert next_hour(t) == datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 7, 18, 10, 0, 0, tzinfo=timezone.utc)
+    assert next_hour(t2) == datetime(2026, 7, 18, 11, 0, tzinfo=timezone.utc)
+
+
 def test_tomorrow_market_day_uses_local_calendar():
     # 23:30 UTC on the 18th is already the 19th in Rome (CEST), so "tomorrow"
     # for publication purposes is the 20th.

@@ -36,6 +36,13 @@ def next_half_hour(now_utc: datetime) -> datetime:
     return nxt
 
 
+def next_hour(now_utc: datetime) -> datetime:
+    """The next whole UTC hour strictly after ``now_utc``."""
+    now_utc = now_utc.astimezone(timezone.utc)
+    base = now_utc.replace(minute=0, second=0, microsecond=0)
+    return base + timedelta(hours=1)
+
+
 def next_daily_run(now_utc: datetime,
                    hour: int = RETRAIN_LOCAL_HOUR,
                    minute: int = RETRAIN_LOCAL_MINUTE) -> datetime:

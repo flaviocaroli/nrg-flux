@@ -22,3 +22,6 @@ frontend/dist/
 # misc
 .DS_Store
 *.log
+
+# runtime locks
+backend/.ingest.lock

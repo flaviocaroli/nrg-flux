@@ -37,7 +37,7 @@ function loadChart(loadFc, loadAct) {
     { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
       stack: 'b', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
     { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-      stack: 'b', areaStyle: { color: 'rgba(31,73,224,0.10)' },
+      stack: 'b', areaStyle: { color: 'rgba(56,173,164,0.12)' },
       data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
   ] : []
   const option = {
@@ -80,7 +80,7 @@ function priceChart(priceFc, priceAct) {
       { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
         stack: 'pb', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
       { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-        stack: 'pb', areaStyle: { color: 'rgba(215,126,0,0.10)' },
+        stack: 'pb', areaStyle: { color: 'rgba(227,172,53,0.12)' },
         data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
       { name: 'Actual', type: 'line', showSymbol: false, smooth: 0.12,
         lineStyle: { width: 2, color: C.chalk }, itemStyle: { color: C.chalk },
@@ -102,26 +102,36 @@ function CountryBlock({ market }) {
 
   useEffect(() => {
     let live = true
-    setBusy(true)
-    setData(null)
+    let first = true
     const zone = market.zones[0]?.eic
     const unavailable = () => Promise.reject(new Error('unavailable'))
-    Promise.allSettled([
-      market.has_load_forecast ? api.forecast(168, market.national_eic) : unavailable(),
-      market.has_price_forecast && zone ? api.priceForecast(48, zone) : unavailable(),
-      market.load_rows > 0 ? api.loadActual(market.national_eic) : unavailable(),
-      market.price_rows > 0 && zone ? api.pricesFor(zone) : unavailable(),
-    ]).then(([lf, pf, la, pr]) => {
-      if (!live) return
-      setData({
-        loadFc: lf.status === 'fulfilled' ? lf.value : null,
-        priceFc: pf.status === 'fulfilled' ? pf.value : null,
-        loadAct: la.status === 'fulfilled' ? la.value.series : [],
-        priceAct: pr.status === 'fulfilled' ? pr.value.series : [],
+
+    const refresh = () => {
+      if (first) {
+        setBusy(true)
+        setData(null)
+      }
+      Promise.allSettled([
+        market.has_load_forecast ? api.forecast(168, market.national_eic) : unavailable(),
+        market.has_price_forecast && zone ? api.priceForecast(48, zone) : unavailable(),
+        market.load_rows > 0 ? api.loadActual(market.national_eic) : unavailable(),
+        market.price_rows > 0 && zone ? api.pricesFor(zone) : unavailable(),
+      ]).then(([lf, pf, la, pr]) => {
+        if (!live) return
+        setData({
+          loadFc: lf.status === 'fulfilled' ? lf.value : null,
+          priceFc: pf.status === 'fulfilled' ? pf.value : null,
+          loadAct: la.status === 'fulfilled' ? la.value.series : [],
+          priceAct: pr.status === 'fulfilled' ? pr.value.series : [],
+        })
+        setBusy(false)
+        first = false
       })
-      setBusy(false)
-    })
-    return () => { live = false }
+    }
+
+    refresh()
+    const id = setInterval(refresh, 120000)
+    return () => { live = false; clearInterval(id) }
   }, [market])
 
   const lo = useMemo(() => (data ? loadChart(data.loadFc, data.loadAct) : null), [data])

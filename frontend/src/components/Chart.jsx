@@ -11,10 +11,10 @@ import * as echarts from 'echarts'
  * keeps working: `harbor` is now the paper ground, `chalk` the ink.
  */
 export const C = {
-  harbor: '#EDF0F2', panel: '#FFFFFF', hairline: '#D7DDE6',
-  chalk: '#0E1B2C', slate: '#54657D', slateDim: '#8C99AB',
-  amber: '#D77E00', teal: '#1F49E0', alarm: '#CC3D4E', ok: '#188A57',
-  zones: ['#D77E00', '#B8447E', '#1F49E0', '#6A3FC0', '#188A57', '#8A6D1B'],
+  harbor: '#F3F7F7', panel: '#FFFFFF', hairline: '#D8E2E3',
+  chalk: '#294357', slate: '#607481', slateDim: '#91A1AA',
+  amber: '#E3AC35', teal: '#38ADA4', alarm: '#C84E5B', ok: '#2B8D70',
+  zones: ['#E3AC35', '#38ADA4', '#294357', '#6D8790', '#79C7C0', '#B4862D'],
 }
 
 export const axisBase = {
