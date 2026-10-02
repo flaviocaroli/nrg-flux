@@ -28,7 +28,6 @@ problems are logged but do not fail the cycle (they self-heal next run).
 from __future__ import annotations
 
 import argparse
-import fcntl
 import os
 import subprocess
 import sys
@@ -37,6 +36,8 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
+
+from app.utils.process_lock import try_process_lock  # noqa: E402
 
 LOCK_FILE = BACKEND / ".ingest.lock"
 WEATHER_TOPUP_HOURS = 26  # ERA5 lands daily; top up when older than ~a day
@@ -122,10 +123,8 @@ def main() -> int:
                if m.strip()]
     eu_markets = [m for m in markets if m != "IT"]
 
-    lock = open(LOCK_FILE, "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    lock = try_process_lock(LOCK_FILE)
+    if lock is None:
         log("another ingest cycle is already running — exiting cleanly")
         return 0
 

@@ -140,7 +140,7 @@ export default function App() {
   if (err) return (
     <div className="error">
       <div>
-        Europe Grid Pulse can't reach the NRG-Flux API.
+        NRG-Flux Europe can't reach the NRG-Flux API.
         <code>{err}</code>
       </div>
     </div>
@@ -154,10 +154,12 @@ export default function App() {
   return (
     <div className="shell">
       <header className="masthead">
-        <span className="brand">NRG<b>-FLUX</b></span>
-        <h1>Europe Grid Pulse
-          <small>11 European markets · Italy reference market · auditable forecasts</small>
-        </h1>
+        <div className="brand-lockup">
+          <img className="brand-mark" src="/nrg-flux-logo.svg" alt="" />
+          <h1>NRG-Flux <span className="region-label">Europe</span>
+            <small>11 European markets · Italy reference market · auditable forecasts</small>
+          </h1>
+        </div>
         <div className="meta">
           <span>{new Date(dash.generated_at_utc).toUTCString().replace('GMT', 'UTC')}</span>
           <span className={`pill ${dash.demo_mode ? 'demo' : ''}`}>

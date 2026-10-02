@@ -5,28 +5,63 @@ import InfoTip from './InfoTip'
 
 const ORDER = ['IT', 'FR', 'DE', 'CH', 'AT', 'SI', 'GR', 'BE', 'NL', 'ES', 'GB']
 
+const finite = (value) => Number.isFinite(Number(value))
+const median = (values) => {
+  const ordered = values.filter(finite).map(Number).sort((a, b) => a - b)
+  if (!ordered.length) return 0
+  const middle = Math.floor(ordered.length / 2)
+  return ordered.length % 2 ? ordered[middle] : (ordered[middle - 1] + ordered[middle]) / 2
+}
+
+const compactMw = (value) => new Intl.NumberFormat('en', {
+  notation: 'compact', maximumFractionDigits: 1,
+}).format(Number(value))
+
 function loadChart(loadFc, loadAct) {
   if (!loadFc && !loadAct?.length) return null
-  const band = (loadFc?.forecast || []).map((p) => [p.ts_utc, p.mw_p10, p.mw_p90])
-  return {
+  const forecast = (loadFc?.forecast || []).filter((p) => finite(p.mw_p50))
+  const centre = Math.max(1, median([
+    ...(loadAct || []).map((p) => p.value),
+    ...forecast.map((p) => p.mw_p50),
+  ]))
+  const band = forecast.filter((p) => (
+    finite(p.mw_p10) && finite(p.mw_p90)
+    && Number(p.mw_p10) >= 0
+    && Number(p.mw_p10) <= Number(p.mw_p50)
+    && Number(p.mw_p50) <= Number(p.mw_p90)
+    && Number(p.mw_p90) <= centre * 2.5
+    && Number(p.mw_p90) - Number(p.mw_p10) <= centre * 1.5
+  )).map((p) => [p.ts_utc, Number(p.mw_p10), Number(p.mw_p90)])
+  const bandHealthy = band.length === forecast.length && band.length > 0
+  const bandSeries = bandHealthy ? [
+    { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
+      stack: 'b', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
+    { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
+      stack: 'b', areaStyle: { color: 'rgba(31,73,224,0.10)' },
+      data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
+  ] : []
+  const option = {
     backgroundColor: 'transparent',
     tooltip: { ...tooltipBase, valueFormatter: (v) => (v != null ? `${Math.round(v).toLocaleString()} MW` : '—') },
     legend: { textStyle: { color: C.slate, fontFamily: 'IBM Plex Mono', fontSize: 10 }, top: 0,
       icon: 'roundRect', itemWidth: 12, itemHeight: 3, data: ['Actual', 'Forecast p50'] },
-    grid: { left: 56, right: 12, top: 28, bottom: 24 },
+    grid: { left: 68, right: 12, top: 28, bottom: 24 },
     xAxis: { type: 'time', ...axisBase, splitLine: { show: false } },
-    yAxis: { type: 'value', name: 'MW', nameTextStyle: { color: C.slateDim, fontFamily: 'IBM Plex Mono' }, ...axisBase, scale: true },
+    yAxis: { type: 'value', name: 'MW', nameTextStyle: { color: C.slateDim, fontFamily: 'IBM Plex Mono' },
+      ...axisBase, axisLabel: { ...axisBase.axisLabel, formatter: compactMw }, scale: true },
     series: [
-      { name: 'p10 lo', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-        stack: 'b', data: band.map(([t, lo]) => [t, lo]), tooltip: { show: false } },
-      { name: 'p10–p90', type: 'line', showSymbol: false, silent: true, lineStyle: { width: 0 },
-        stack: 'b', areaStyle: { color: 'rgba(31,73,224,0.10)' },
-        data: band.map(([t, lo, hi]) => [t, hi - lo]), tooltip: { show: false } },
+      ...bandSeries,
       { name: 'Actual', type: 'line', showSymbol: false, lineStyle: { width: 2, color: C.chalk },
         itemStyle: { color: C.chalk }, data: (loadAct || []).map((p) => [p.ts_utc, p.value]) },
       { name: 'Forecast p50', type: 'line', showSymbol: false, lineStyle: { width: 2.2, color: C.teal },
-        itemStyle: { color: C.teal }, data: (loadFc?.forecast || []).map((p) => [p.ts_utc, p.mw_p50]) },
+        itemStyle: { color: C.teal }, data: forecast.map((p) => [p.ts_utc, Number(p.mw_p50)]) },
     ],
+  }
+  return {
+    option,
+    warning: forecast.length && !bandHealthy
+      ? 'The uncertainty band failed a scale/ordering check and is withheld. Actual load and the P50 forecast remain visible.'
+      : null,
   }
 }
 
@@ -110,7 +145,8 @@ function CountryBlock({ market }) {
           {data && !data.loadFc && (
             <div className="train-hint">Forecast is not published yet. Verified actual load remains visible.</div>
           )}
-          {lo ? <Chart option={lo} /> : !busy && (
+          {lo?.warning && <div className="model-warning">{lo.warning}</div>}
+          {lo ? <Chart option={lo.option} /> : !busy && (
             <div className="empty-note">No load data is currently available for {market.name}.</div>
           )}
         </div>

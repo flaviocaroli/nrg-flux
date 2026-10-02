@@ -492,6 +492,36 @@ def test_old_model_cards_fall_back_to_symmetric():
         assert m.scale_lo == m.scale_hi == 0.25
 
 
+def test_load_band_falls_back_when_multiplicative_scale_explodes():
+    import pandas as pd
+    from app.forecasting.model import LoadForecaster
+
+    model = LoadForecaster(model_dir=".", area_eic="TEST")
+    model.calibration_mode = "normalized"
+    model.scale_lo = 1_000.0
+    model.scale_hi = 1_000.0
+    model.conformal_q = 500.0
+    raw = pd.DataFrame({"p10": [49_000.0], "p50": [50_000.0], "p90": [51_000.0]})
+
+    result = model._finish(raw)
+
+    assert result.loc[0, "p10"] == 48_500.0
+    assert result.loc[0, "p90"] == 51_500.0
+
+
+def test_process_lock_is_non_blocking_and_reusable(tmp_path):
+    from app.utils.process_lock import try_process_lock
+
+    path = tmp_path / "job.lock"
+    first = try_process_lock(path)
+    assert first is not None
+    assert try_process_lock(path) is None
+    first.close()
+    again = try_process_lock(path)
+    assert again is not None
+    again.close()
+
+
 def test_issue_time_europe_features_do_not_use_forecast_day_actuals():
     import numpy as np
     import pandas as pd
@@ -526,6 +556,33 @@ def test_forecast_arena_metrics_use_common_rows():
     result = metrics(actual, pred)
     assert result["sample_count"] == 2
     assert result["wape"] == 10.0
+
+
+def test_tso_comparison_evidence_is_saved_not_left_to_browser():
+    from app.forecasting.evaluation import _tso_comparison_evidence
+
+    folds = [
+        {"series": [{"actual_mw": 100.0, "predictions": {
+            "tso_retrieved": 100.0, "lgbm_eu_3": 110.0, "lgbm_eu_4": 120.0,
+        }}]},
+        {"series": [{"actual_mw": 100.0, "predictions": {
+            "tso_retrieved": 120.0, "lgbm_eu_3": 110.0, "lgbm_eu_4": 100.0,
+        }}]},
+    ]
+    by_id = {
+        "lgbm_domestic": {"wape": 10.0},
+        "lgbm_eu_4": {"wape": 8.0},
+    }
+
+    evidence = _tso_comparison_evidence(folds, "lgbm_eu_4", by_id)
+
+    assert evidence["forecast_days"] == 2
+    assert evidence["sample_hours"] == 2
+    assert evidence["winner_counts"]["tso_retrieved"] == 1
+    assert evidence["winner_counts"]["lgbm_eu_4"] == 1
+    assert evidence["observed_wape_difference_points"] == 0.0
+    assert evidence["relative_wape_gain_vs_domestic_pct"] == 20.0
+    assert evidence["equivalence_established"] is False
 
 
 def test_outage_parser_normalises_kw_nominal_to_mw():

@@ -24,7 +24,7 @@ from .resolution import to_hourly_mean
 
 
 SCHEMA_VERSION = "1.0"
-BENCHMARK_VERSION = "0.1.0"
+BENCHMARK_VERSION = "0.2.0"
 DEFAULT_HORIZON = 24
 MODEL_LABELS = {
     "naive_weekly": "Weekly seasonal naive",
@@ -223,6 +223,87 @@ def _iso(ts: pd.Timestamp) -> str:
     return ts.tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _tso_comparison_evidence(folds: list[dict], best_nrg_id: str | None,
+                             by_id: dict[str, dict]) -> dict | None:
+    """Persist paired day-level evidence; the browser must not derive claims."""
+    if not best_nrg_id or best_nrg_id not in by_id:
+        return None
+    comparison_ids = ["tso_retrieved", "lgbm_eu_3", "lgbm_eu_4"]
+    blocks: list[list[float]] = []
+    winner_counts = {model_id: 0 for model_id in comparison_ids}
+
+    for fold in folds:
+        rows = [row for row in fold.get("series", [])
+                if "tso_retrieved" in row.get("predictions", {})
+                and best_nrg_id in row.get("predictions", {})]
+        if not rows:
+            continue
+        actual = np.asarray([row["actual_mw"] for row in rows], dtype=float)
+        denominator = float(np.abs(actual).sum())
+        tso_error = float(np.abs(actual - np.asarray([
+            row["predictions"]["tso_retrieved"] for row in rows], dtype=float)).sum())
+        best_error = float(np.abs(actual - np.asarray([
+            row["predictions"][best_nrg_id] for row in rows], dtype=float)).sum())
+        blocks.append([denominator, tso_error, best_error, float(len(rows))])
+
+        winner_rows = [row for row in fold.get("series", [])
+                       if all(model_id in row.get("predictions", {})
+                              for model_id in comparison_ids)]
+        if winner_rows:
+            winner_actual = np.asarray([row["actual_mw"] for row in winner_rows], dtype=float)
+            errors = {
+                model_id: float(np.abs(winner_actual - np.asarray([
+                    row["predictions"][model_id] for row in winner_rows],
+                    dtype=float)).sum())
+                for model_id in comparison_ids
+            }
+            winner_counts[min(errors, key=errors.get)] += 1
+
+    if len(blocks) < 2:
+        return None
+
+    values = np.asarray(blocks, dtype=float)
+    observed = float((values[:, 2].sum() - values[:, 1].sum())
+                     / values[:, 0].sum() * 100.0)
+    rng = np.random.default_rng(42)
+    indices = rng.integers(0, len(values), size=(20_000, len(values)))
+    samples = values[indices].sum(axis=1)
+    differences = (samples[:, 2] - samples[:, 1]) / samples[:, 0] * 100.0
+    ci_low, ci_high = np.percentile(differences, [2.5, 97.5])
+    probability = float(np.mean(differences <= 0.0) * 100.0)
+
+    domestic = by_id.get("lgbm_domestic", {})
+    best = by_id[best_nrg_id]
+    relative_gain = None
+    if domestic.get("wape") and best.get("wape") is not None:
+        relative_gain = float(100 * (1 - best["wape"] / domestic["wape"]))
+    gain_text = f"{relative_gain:.1f}%" if relative_gain is not None else "an unavailable amount"
+
+    return {
+        "status": "PRELIMINARY",
+        "best_nrg_model_id": best_nrg_id,
+        "forecast_days": int(len(values)),
+        "sample_hours": int(values[:, 3].sum()),
+        "winner_counts": winner_counts,
+        "observed_wape_difference_points": round(observed, 4),
+        "day_block_bootstrap_95_ci_points": [round(float(ci_low), 4),
+                                               round(float(ci_high), 4)],
+        "bootstrap_probability_best_nrg_better_pct": round(probability, 1),
+        "relative_wape_gain_vs_domestic_pct": (round(relative_gain, 2)
+                                                if relative_gain is not None else None),
+        "equivalence_established": False,
+        "conclusion": (
+            f"Selected European grid variables reduced NRG-Flux error by approximately "
+            f"{gain_text} versus its domestic benchmark and brought it close to the "
+            f"retrieved TSO forecast. With {len(values)} forecast days, the evaluation "
+            "cannot establish a reliable performance difference between them."
+        ),
+        "caveat": ("The 95% day-block interval crosses zero. This is inconclusive "
+                   "evidence, not proof of equivalence or superiority."),
+        "method": "20,000-resample forecast-day block bootstrap; deterministic seed 42",
+    }
+
+
 def run_benchmark(model_dir: str, folds: int = 4, spacing_days: int = 7,
                   include_statistical: bool = True) -> tuple[dict, Path]:
     data = load_benchmark_data()
@@ -362,6 +443,7 @@ def run_benchmark(model_dir: str, folds: int = 4, spacing_days: int = 7,
     european_candidates = [row for row in candidates if row["model_id"].startswith("lgbm_eu_")]
     best_european = (min(european_candidates, key=lambda row: row["wape"])
                      if european_candidates else None)
+    tso_comparison = _tso_comparison_evidence(fold_payloads, best, by_id)
     artifact = {
         "schema_version": SCHEMA_VERSION,
         "benchmark_version": BENCHMARK_VERSION,
@@ -385,6 +467,7 @@ def run_benchmark(model_dir: str, folds: int = 4, spacing_days: int = 7,
         },
         "models": model_rows, "folds": fold_payloads, "failures": failures,
         "best_nrg_model_id": best,
+        "tso_comparison": tso_comparison,
         "europe_acceptance": {
             "accepted": accepted, "relative_wape_gain_pct": relative_gain,
             "folds_won": wins, "folds_required": 3,

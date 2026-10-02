@@ -43,6 +43,14 @@ def main():
     print(f"  relative gain   : {gate['relative_wape_gain_pct']}")
     print(f"  folds won       : {gate['folds_won']}/{artifact['protocol']['rolling_origins']}")
     print(f"  peak gate       : {gate['peak_mae_gate_passed']}")
+    evidence = artifact.get("tso_comparison")
+    if evidence:
+        low, high = evidence["day_block_bootstrap_95_ci_points"]
+        print("\nTSO COMPARISON EVIDENCE")
+        print(f"  paired WAPE gap : {evidence['observed_wape_difference_points']:+.4f} points")
+        print(f"  day-block 95% CI: [{low:+.4f}, {high:+.4f}]")
+        print(f"  P(NRG better)   : {evidence['bootstrap_probability_best_nrg_better_pct']:.1f}%")
+        print(f"  conclusion      : {evidence['conclusion']}")
     if artifact["failures"]:
         print("\nFAILURES REQUIRING REVIEW")
         for failure in artifact["failures"]:

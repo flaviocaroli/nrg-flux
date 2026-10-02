@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import * as echarts from 'echarts'
 
 /*
- * Design tokens — "Europe Grid Pulse", daylight control room.
+ * Design tokens — "NRG-Flux Europe", daylight control room.
  * Cool paper ground, white instrument cards, ink numerals.
  *   voltage cobalt -> demand / our forecasts
  *   auction amber  -> markets / prices

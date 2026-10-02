@@ -23,6 +23,7 @@ const DASHES = {
 }
 
 const fmt = (value, digits = 2) => value == null ? '—' : Number(value).toFixed(digits)
+const signed = (value, digits = 4) => value == null ? '—' : `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(digits)}`
 const fmtDate = (iso) => new Date(iso).toLocaleString('en-GB', {
   day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
   timeZone: 'Europe/Rome',
@@ -103,6 +104,7 @@ export default function ForecastBenchmarkPanel() {
 
   const best = modelsById[data.best_nrg_model_id]
   const gate = data.europe_acceptance
+  const evidence = data.tso_comparison
   const ablations = data.models.filter((model) => model.model_id.startsWith('lgbm_'))
   const toggle = (id) => setVisible((current) => {
     const next = new Set(current)
@@ -114,7 +116,7 @@ export default function ForecastBenchmarkPanel() {
     <section className="panel arena-shell">
       <div className="arena-head">
         <div>
-          <h2>Forecast Arena <span className="tag">Italy · next 24 hours · four rolling origins</span><InfoTip label="About Forecast Arena">Black is actual load. Toggle models to compare the same saved target hours. LightGBM variants use Italian calendar, lagged load and lagged temperature; European variants add selected neighbouring load and import-direction physical-flow history. TSO is retrieved/final revision data, so it remains preliminary.</InfoTip></h2>
+          <h2>Forecast Arena <span className="tag">Italy · next 24 hours · {data.protocol.rolling_origins} rolling origins</span><InfoTip label="About Forecast Arena">Black is actual load. Toggle models to compare the same saved target hours. LightGBM variants use Italian calendar, lagged load and lagged temperature; European variants add selected neighbouring load and import-direction physical-flow history. TSO is retrieved/final revision data, so it remains preliminary.</InfoTip></h2>
           <p>{data.question}</p>
         </div>
         <span className={`arena-verdict ${gate.accepted ? 'accepted' : 'withheld'}`}>
@@ -128,6 +130,28 @@ export default function ForecastBenchmarkPanel() {
         <div><span>Skill vs naive</span><b>{best?.skill_vs_naive_pct == null ? '—' : `${fmt(best.skill_vs_naive_pct, 1)}%`}</b></div>
         <div><span>EU-5 gain vs domestic</span><b>{gate.relative_wape_gain_pct == null ? '—' : `${fmt(gate.relative_wape_gain_pct, 1)}%`}</b></div>
       </div>
+
+      {evidence && (
+        <div className="arena-evidence">
+          <div className="arena-evidence-head">
+            <strong>How strong is the TSO comparison?</strong>
+            <span>{evidence.status} · {evidence.forecast_days} FORECAST DAYS</span>
+            <InfoTip label="About comparison uncertainty">The confidence interval is calculated in the saved backend artifact by resampling complete forecast days, preserving the within-day dependence of hourly errors. A range crossing zero means the current sample cannot establish which forecast is reliably better.</InfoTip>
+          </div>
+          <div className="arena-evidence-grid">
+            <div><span>TSO daily wins</span><b>{evidence.winner_counts?.tso_retrieved ?? '—'}/{evidence.forecast_days}</b></div>
+            <div><span>EU-3 daily wins</span><b>{evidence.winner_counts?.lgbm_eu_3 ?? '—'}/{evidence.forecast_days}</b></div>
+            <div><span>EU-4 daily wins</span><b>{evidence.winner_counts?.lgbm_eu_4 ?? '—'}/{evidence.forecast_days}</b></div>
+            <div><span>Best NRG − TSO WAPE</span><b>{signed(evidence.observed_wape_difference_points)} pp</b></div>
+            <div><span>95% day-block interval</span><b>{signed(evidence.day_block_bootstrap_95_ci_points?.[0])} to {signed(evidence.day_block_bootstrap_95_ci_points?.[1])}</b></div>
+            <div><span>P(best NRG beats TSO)</span><b>{fmt(evidence.bootstrap_probability_best_nrg_better_pct, 0)}%</b></div>
+          </div>
+          <div className="arena-evidence-conclusion">
+            <strong>Defensible conclusion: </strong>{evidence.conclusion}
+            <small>{evidence.caveat}</small>
+          </div>
+        </div>
+      )}
 
       <div className="arena-controls" aria-label="Forecast series visibility">
         <span className="arena-actual"><i style={{ background: COLORS.actual }} />Actual load</span>

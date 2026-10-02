@@ -692,6 +692,8 @@ A public model-comparison table should use identical target timestamps and repor
 
 A model must be withheld or marked for review when there is data leakage, insufficient common coverage, optimizer failure, invalid intervals, unproven TSO issue times or inconsistent performance across rolling windows.
 
+
+
 ## Temporary-demo limitations
 
 Cloudflare Quick Tunnel is appropriate for a short supervised presentation but is not permanent hosting. The random hostname has no uptime guarantee and changes after restarting the tunnel.

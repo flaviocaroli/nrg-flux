@@ -25,7 +25,6 @@ Environment knobs:
 from __future__ import annotations
 
 import argparse
-import fcntl
 import os
 import subprocess
 import sys
@@ -35,6 +34,8 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
+
+from app.utils.process_lock import try_process_lock  # noqa: E402
 
 LOCK_FILE = BACKEND / ".retrain.lock"
 TRAIN_TIMEOUT_S = 40 * 60
@@ -97,10 +98,8 @@ def main() -> int:
                if m.strip() and m.strip().upper() in MARKET_EICS]
     retries = int(os.environ.get("NRGFLUX_RETRAIN_RETRIES", "8"))
 
-    lock = open(LOCK_FILE, "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    lock = try_process_lock(LOCK_FILE)
+    if lock is None:
         log("a retrain is already running — exiting cleanly")
         return 0
 
