@@ -26,6 +26,7 @@ from app.config import get_settings  # noqa: E402
 from app.db.models import (FuelPrice, LoadActual, LoadForecastTso,  # noqa: E402
                            PriceDayAhead, SessionLocal, init_db)
 from app.forecasting.price_model import PriceForecaster  # noqa: E402
+from app.forecasting.resolution import to_hourly_mean  # noqa: E402
 from app.services.forecast_service import (issue_price_forecast,  # noqa: E402
                                            national_for_zone)
 
@@ -40,7 +41,8 @@ def series_from(db, model, area, value_attr, days=400):
     idx = pd.DatetimeIndex([r.ts_utc.replace(tzinfo=timezone.utc)
                             if r.ts_utc.tzinfo is None else r.ts_utc
                             for r in rows], tz="UTC")
-    return pd.Series([getattr(r, value_attr) for r in rows], index=idx).sort_index()
+    raw = pd.Series([getattr(r, value_attr) for r in rows], index=idx).sort_index()
+    return to_hourly_mean(raw)
 
 
 def tso_forecast_series(db, area: str, days: int = 800) -> pd.Series:
@@ -64,7 +66,7 @@ def tso_forecast_series(db, area: str, days: int = 800) -> pd.Series:
                             if r.ts_utc.tzinfo is None else r.ts_utc
                             for r in rows], tz="UTC")
     s = pd.Series([r.forecast_mw for r in rows], index=idx).sort_index()
-    return s[~s.index.duplicated(keep="last")]
+    return to_hourly_mean(s)
 
 
 def gas_series(db) -> pd.Series:

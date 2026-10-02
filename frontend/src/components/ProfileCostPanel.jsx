@@ -8,6 +8,7 @@ import {
   makeTemplateCsv,
   parseProfileCsv,
 } from '../lib/profileCost'
+import InfoTip from './InfoTip'
 
 const ITALY_NORD_EIC = '10Y1001A1001A73I'
 const currency = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
@@ -86,7 +87,7 @@ export default function ProfileCostPanel() {
     <section className="profile-cost panel" aria-labelledby="profile-cost-title">
       <div className="profile-head">
         <div>
-          <h2 id="profile-cost-title">Consumption profile → spot-energy benchmark <span className="tag">Italy NORD · browser-only CSV</span></h2>
+          <h2 id="profile-cost-title">Consumption profile → spot-energy benchmark <span className="tag">Italy NORD · browser-only CSV</span><InfoTip label="About the spot-energy benchmark">Your interval energy is matched to Italy NORD day-ahead wholesale prices: cost = kWh ÷ 1,000 × EUR/MWh. Processing happens in this browser; this is not a final electricity bill.</InfoTip></h2>
           <p>Upload a profile with interval-start timestamps. Your file stays in this browser and is not stored by NRG-Flux.</p>
         </div>
         <button className="pc-button secondary" type="button" onClick={() => downloadText('nrg-flux-profile-template.csv', makeTemplateCsv())}>Download CSV template</button>

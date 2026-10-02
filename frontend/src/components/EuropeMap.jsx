@@ -124,7 +124,7 @@ function heat(p, lo, hi) {
   return `rgb(${c[0]},${c[1]},${c[2]})`
 }
 
-export default function EuropeMap({ dash, markets = {} }) {
+export default function EuropeMap({ dash, markets = {}, selectedCountry = 'IT', onSelect }) {
   const [hover, setHover] = useState(null)
   const prices = dash?.prices || {}
   const flows = Object.fromEntries(
@@ -181,13 +181,17 @@ export default function EuropeMap({ dash, markets = {} }) {
           const p = ccPrice(cc)
           const f = heat(p, lo, hi)
           const on = hover === cc
+          const selected = selectedCountry === cc
           const [cx, cy] = centroid(cfg.c)
           return (
             <g key={cc} onMouseEnter={() => setHover(cc)} onMouseLeave={() => setHover(null)}
-              style={{ cursor: 'pointer' }}>
+              onClick={() => onSelect?.(cc)} role="button" tabIndex="0"
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect?.(cc) }}
+              aria-label={`Open ${cfg.name} market`} style={{ cursor: 'pointer' }}>
               <path d={toPath(cfg.c)} fill={f || '#EFF2F6'}
                 fillOpacity={f ? (on ? 0.88 : 0.6) : 0.5}
-                stroke={on ? C.chalk : C.hairline} strokeWidth={on ? 1.6 : 0.9}
+                stroke={selected ? C.teal : on ? C.chalk : C.hairline}
+                strokeWidth={selected ? 2.6 : on ? 1.6 : 0.9}
                 strokeDasharray={f ? '0' : '3 2.5'} />
               <text x={cx} y={cy} fill={f ? '#FFFFFF' : C.slate} fontSize="10"
                 fontWeight="700" textAnchor="middle" fontFamily="Space Grotesk">{cc}</text>
@@ -203,12 +207,16 @@ export default function EuropeMap({ dash, markets = {} }) {
           const p = itPrice(z)
           const f = heat(p, lo, hi)
           const on = hover === z
+          const selected = selectedCountry === 'IT'
           const [cx, cy] = centroid(co)
           return (
             <g key={z} onMouseEnter={() => setHover(z)} onMouseLeave={() => setHover(null)}
-              style={{ cursor: 'pointer' }}>
+              onClick={() => onSelect?.('IT')} role="button" tabIndex="0"
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect?.('IT') }}
+              aria-label={`Open Italy ${z} market`} style={{ cursor: 'pointer' }}>
               <path d={toPath(co)} fill={f || '#EFF2F6'} fillOpacity={on ? 0.92 : 0.78}
-                stroke={on ? C.chalk : C.amber} strokeWidth={on ? 1.6 : 0.9} />
+                stroke={selected ? C.teal : on ? C.chalk : C.amber}
+                strokeWidth={selected ? 1.8 : on ? 1.6 : 0.9} />
               <text x={cx} y={cy - 1} fill="#FFFFFF" fontSize="7.5" fontWeight="700"
                 textAnchor="middle" fontFamily="Space Grotesk">{z}</text>
               {p != null && (
@@ -220,7 +228,7 @@ export default function EuropeMap({ dash, markets = {} }) {
         })}
 
         <text x="6" y={VB_H - 6} fill={C.slateDim} fontSize="8.5" fontFamily="IBM Plex Mono">
-          price heat · dashed = not backfilled · arrows = physical flows (MW)
+          click a market to explore · dashed = price unavailable · arrows = physical flows (MW)
         </text>
       </svg>
 
@@ -235,7 +243,7 @@ export default function EuropeMap({ dash, markets = {} }) {
           <b>{nameOf(hover)}</b>
           <div>{priceOf(hover) != null
             ? `${priceOf(hover).toFixed(2)} €/MWh`
-            : 'not backfilled'}</div>
+            : 'price data unavailable'}</div>
           {markets?.[hover]?.load_mw != null && (
             <div style={{ color: C.slate }}>{markets[hover].load_mw.toLocaleString()} MW</div>
           )}

@@ -5,7 +5,7 @@ Includes the DST "golden tests" the plan makes a hard gate:
 Run: cd backend && python -m pytest tests/ -q
 """
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -357,6 +357,31 @@ def test_eu_markets_reference_known_eics():
                 missing.append((cc, z))
     assert not missing, f"markets reference unseeded EICs: {missing}"
 
+
+def test_neso_utc_bounds_accept_aware_and_naive_datetimes():
+    from app.ingestion.neso import _utc_timestamp
+
+    naive = _utc_timestamp(datetime(2026, 1, 1, 12, 0))
+    aware = _utc_timestamp(datetime(2026, 1, 1, 13, 0,
+                                    tzinfo=timezone(timedelta(hours=1))))
+
+    assert naive.isoformat() == "2026-01-01T12:00:00+00:00"
+    assert aware.isoformat() == "2026-01-01T12:00:00+00:00"
+
+
+def test_europe_expansion_markets_have_weather_centroids():
+    """Every configured expansion market must be trainable with real weather."""
+    from app.utils.eic import EU_MARKETS, ZONE_CENTROIDS
+
+    expected = {
+        "BE": "10YBE----------2",
+        "SI": "10YSI-ELES-----O",
+        "GR": "10YGR-HTSO-----Y",
+    }
+    for country, national_eic in expected.items():
+        assert EU_MARKETS[country]["national"] == national_eic
+        assert national_eic in ZONE_CENTROIDS
+
 # --------------------------------------------------- scheduler time math
 # The scheduler must fire at 13:05 Europe/Rome regardless of DST — these are
 # golden tests in the same spirit as the market-day DST gate above.
@@ -467,6 +492,99 @@ def test_old_model_cards_fall_back_to_symmetric():
         assert m.scale_lo == m.scale_hi == 0.25
 
 
+def test_load_band_falls_back_when_multiplicative_scale_explodes():
+    import pandas as pd
+    from app.forecasting.model import LoadForecaster
+
+    model = LoadForecaster(model_dir=".", area_eic="TEST")
+    model.calibration_mode = "normalized"
+    model.scale_lo = 1_000.0
+    model.scale_hi = 1_000.0
+    model.conformal_q = 500.0
+    raw = pd.DataFrame({"p10": [49_000.0], "p50": [50_000.0], "p90": [51_000.0]})
+
+    result = model._finish(raw)
+
+    assert result.loc[0, "p10"] == 48_500.0
+    assert result.loc[0, "p90"] == 51_500.0
+
+
+def test_process_lock_is_non_blocking_and_reusable(tmp_path):
+    from app.utils.process_lock import try_process_lock
+
+    path = tmp_path / "job.lock"
+    first = try_process_lock(path)
+    assert first is not None
+    assert try_process_lock(path) is None
+    first.close()
+    again = try_process_lock(path)
+    assert again is not None
+    again.close()
+
+
+def test_issue_time_europe_features_do_not_use_forecast_day_actuals():
+    import numpy as np
+    import pandas as pd
+    from app.forecasting.europe_features import build_issue_time_frame
+
+    idx = pd.date_range("2026-01-01", periods=24 * 20, freq="h", tz="UTC")
+    italy = pd.Series(np.arange(len(idx), dtype=float), index=idx)
+    temp = pd.Series(10.0 + np.arange(len(idx)) / 100.0, index=idx)
+    neighbour_loads = {
+        cc: pd.Series(np.arange(len(idx), dtype=float) + offset, index=idx)
+        for offset, cc in enumerate(("FR", "CH", "AT", "SI", "GR"), start=1000)
+    }
+    flows = {
+        cc: pd.Series(np.arange(len(idx), dtype=float) + offset, index=idx)
+        for offset, cc in enumerate(("FR", "CH", "AT", "SI", "GR"), start=2000)
+    }
+    frame = build_issue_time_frame(italy, temp, neighbour_loads, flows)
+    target = idx[-1]
+    assert frame.loc[target, "load_lag_24h"] == italy.loc[target - pd.Timedelta(hours=24)]
+    expected_mean = italy.loc[target - pd.Timedelta(hours=47):target - pd.Timedelta(hours=24)].mean()
+    assert frame.loc[target, "load_issue_mean_24h"] == expected_mean
+    assert frame.loc[target, "fr_flow_lag_24h"] == flows["FR"].loc[target - pd.Timedelta(hours=24)]
+
+
+def test_forecast_arena_metrics_use_common_rows():
+    import numpy as np
+    import pandas as pd
+    from app.forecasting.evaluation import metrics
+
+    actual = pd.Series([100.0, 200.0, 300.0], index=[0, 1, 2])
+    pred = pd.Series([90.0, np.nan, 330.0], index=[0, 1, 2])
+    result = metrics(actual, pred)
+    assert result["sample_count"] == 2
+    assert result["wape"] == 10.0
+
+
+def test_tso_comparison_evidence_is_saved_not_left_to_browser():
+    from app.forecasting.evaluation import _tso_comparison_evidence
+
+    folds = [
+        {"series": [{"actual_mw": 100.0, "predictions": {
+            "tso_retrieved": 100.0, "lgbm_eu_3": 110.0, "lgbm_eu_4": 120.0,
+        }}]},
+        {"series": [{"actual_mw": 100.0, "predictions": {
+            "tso_retrieved": 120.0, "lgbm_eu_3": 110.0, "lgbm_eu_4": 100.0,
+        }}]},
+    ]
+    by_id = {
+        "lgbm_domestic": {"wape": 10.0},
+        "lgbm_eu_4": {"wape": 8.0},
+    }
+
+    evidence = _tso_comparison_evidence(folds, "lgbm_eu_4", by_id)
+
+    assert evidence["forecast_days"] == 2
+    assert evidence["sample_hours"] == 2
+    assert evidence["winner_counts"]["tso_retrieved"] == 1
+    assert evidence["winner_counts"]["lgbm_eu_4"] == 1
+    assert evidence["observed_wape_difference_points"] == 0.0
+    assert evidence["relative_wape_gain_vs_domestic_pct"] == 20.0
+    assert evidence["equivalence_established"] is False
+
+
 def test_outage_parser_normalises_kw_nominal_to_mw():
     from app.parsers.entsoe_xml import parse_unavailability_document
 
@@ -481,3 +599,62 @@ def test_outage_parser_normalises_kw_nominal_to_mw():
     row = parse_unavailability_document(xml)[0]
 
     assert row["unavailable_mw"] == 96.0
+
+def test_neso_2026_resource_id_is_current():
+    source_path = Path(__file__).resolve().parents[1] / "app" / "ingestion" / "neso.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert '2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5"' in source
+def test_neso_historic_resource_years_are_mapped_correctly():
+    source_path = Path(__file__).resolve().parents[1] / "app" / "ingestion" / "neso.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert '2026: "8a4a771c-3929-4e56-93ad-cdf13219dea5"' in source
+    assert '2025: "b2bde559-3455-4021-b179-dfe60c0337b0"' in source
+    assert '2024: "f6d02c0f-957b-48cb-82ee-09003f2ba759"' in source
+
+def test_to_hourly_mean_aggregates_quarter_hour_values():
+    import pandas as pd
+
+    from app.forecasting.resolution import to_hourly_mean
+
+    index = pd.date_range("2026-01-01T00:00:00Z", periods=8, freq="15min")
+    source = pd.Series([100, 200, 300, 400, 500, 600, 700, 800], index=index)
+    hourly = to_hourly_mean(source)
+
+    assert list(hourly.index) == list(pd.date_range(
+        "2026-01-01T00:00:00Z", periods=2, freq="h"
+    ))
+    assert list(hourly.values) == [250.0, 650.0]
+
+
+def test_to_hourly_mean_preserves_hourly_values_and_last_duplicate():
+    import pandas as pd
+
+    from app.forecasting.resolution import to_hourly_mean
+
+    index = pd.DatetimeIndex([
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T01:00:00Z",
+    ])
+    source = pd.Series([1.0, 2.0, 3.0], index=index)
+
+    hourly = to_hourly_mean(source)
+
+    assert list(hourly.values) == [2.0, 3.0]
+
+
+def test_to_hourly_mean_does_not_fill_long_gaps():
+    import pandas as pd
+
+    from app.forecasting.resolution import to_hourly_mean
+
+    index = pd.DatetimeIndex([
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T05:00:00Z",
+    ])
+    source = pd.Series([10.0, 20.0], index=index)
+
+    hourly = to_hourly_mean(source, interpolate_limit=3)
+
+    assert pd.Timestamp("2026-01-01T03:00:00Z") in hourly.index
+    assert pd.Timestamp("2026-01-01T04:00:00Z") not in hourly.index

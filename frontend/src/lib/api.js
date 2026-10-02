@@ -25,5 +25,7 @@ export const api = {
   weather: (area) => get(`/v1/weather/history?area=${encodeURIComponent(area)}`),
   tsoForecast: (area = '10YIT-GRTN-----B') =>
     get(`/v1/load/forecast/tso?area=${encodeURIComponent(area)}`),
+  forecastBenchmark: (area = '10YIT-GRTN-----B') =>
+    get(`/v1/forecast/benchmark?area=${encodeURIComponent(area)}`),
   status: () => get('/v1/status'),
 }

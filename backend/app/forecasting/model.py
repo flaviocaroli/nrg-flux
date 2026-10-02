@@ -58,6 +58,7 @@ class LoadForecaster:
         self.conformal_scale: float = 0.0   # legacy symmetric factor (back-compat)
         self.scale_lo: float = 0.0          # asymmetric CQR: lower-edge factor
         self.scale_hi: float = 0.0          # asymmetric CQR: upper-edge factor
+        self.calibration_mode: str = "normalized"
 
     # ------------------------------------------------------------- training
 
@@ -99,21 +100,38 @@ class LoadForecaster:
         # multiplicative factor, calibrated on its own tail with half the miss
         # budget. Load errors are mildly asymmetric (under-forecast on heat
         # ramps); prices far more so — the shared module serves both.
-        from .calibration import asymmetric_cqr
+        from .calibration import apply_scales, asymmetric_cqr
         scales = asymmetric_cqr(y_cal, lo_cal, hi_cal, TARGET_COVERAGE)
         self.scale_lo, self.scale_hi = scales.lo, scales.hi
         self.conformal_scale = scales.symmetric_equivalent  # legacy field
         raw_scores = np.maximum(lo_cal - y_cal, y_cal - hi_cal)
         level = min(np.ceil((len(raw_scores) + 1) * TARGET_COVERAGE) / len(raw_scores), 1.0)
-        self.conformal_q = float(np.quantile(raw_scores, level, method="higher"))
+        self.conformal_q = max(0.0, float(np.quantile(raw_scores, level, method="higher")))
+
+        # Normalized CQR is useful when the raw quantile width is stable, but
+        # a nearly collapsed raw band can create enormous multiplicative
+        # factors (observed on the French regional model). Select a stable
+        # additive MW correction before looking at the test set whenever the
+        # normalized calibration would be implausibly wide.
+        p10_norm, p90_norm = apply_scales(lo_cal, hi_cal, self.scale_lo, self.scale_hi)
+        typical_load = max(float(np.median(np.abs(y_cal))), 1.0)
+        normalized_width = float(np.median(p90_norm - p10_norm))
+        factors_finite = np.isfinite([self.scale_lo, self.scale_hi]).all()
+        if (not factors_finite or max(abs(self.scale_lo), abs(self.scale_hi)) > 5.0
+                or normalized_width > typical_load * 0.75):
+            self.calibration_mode = "additive"
+        else:
+            self.calibration_mode = "normalized"
 
         # --- backtest vs naive previous-week baseline ---
         y = test_df["y"].to_numpy()
         p50 = self.boosters["p50"].predict(test_df[FEATURES])
         p10_raw = self.boosters["p10"].predict(test_df[FEATURES])
         p90_raw = self.boosters["p90"].predict(test_df[FEATURES])
-        from .calibration import apply_scales
-        p10, p90 = apply_scales(p10_raw, p90_raw, self.scale_lo, self.scale_hi)
+        if self.calibration_mode == "additive":
+            p10, p90 = p10_raw - self.conformal_q, p90_raw + self.conformal_q
+        else:
+            p10, p90 = apply_scales(p10_raw, p90_raw, self.scale_lo, self.scale_hi)
         naive = test_df["load_lag_168h"].to_numpy()
         coverage = float(np.mean((y >= p10) & (y <= p90)) * 100)
         coverage_raw = float(np.mean((y >= p10_raw) & (y <= p90_raw)) * 100)
@@ -149,8 +167,7 @@ class LoadForecaster:
                 "conformal_scale": round(self.conformal_scale, 4),
                 "conformal_scale_lo": round(self.scale_lo, 4),
                 "conformal_scale_hi": round(self.scale_hi, 4),
-                "mode": "normalized asymmetric CQR, rolling window (v6)",
-                "mode": "normalized (multiplicative) — scales with local band width",
+                "mode": self.calibration_mode,
                 "calibration_hours": int(cal_n),
             },
             "load_range_mw": [round(float(load.min())), round(float(load.max()))],
@@ -190,6 +207,7 @@ class LoadForecaster:
                                               self.conformal_scale))
                 self.scale_hi = float(cal.get("conformal_scale_hi",
                                               self.conformal_scale))
+                self.calibration_mode = str(cal.get("mode", "normalized"))
             return True
         except Exception:
             return False
@@ -233,10 +251,27 @@ class LoadForecaster:
         return self._finish(out)
 
     def _finish(self, out: pd.DataFrame) -> pd.DataFrame:
-        # normalized conformal widening, validated in the backtest
+        raw_p10, raw_p90 = out["p10"].copy(), out["p90"].copy()
         width = np.maximum(out["p90"] - out["p10"], 1e-6)
-        out["p10"] = out["p10"] - self.scale_lo * width
-        out["p90"] = out["p90"] + self.scale_hi * width
+        if self.calibration_mode == "additive":
+            out["p10"] = out["p10"] - self.conformal_q
+            out["p90"] = out["p90"] + self.conformal_q
+        else:
+            out["p10"] = out["p10"] - self.scale_lo * width
+            out["p90"] = out["p90"] + self.scale_hi * width
+
+        # Backward-compatible guard for already-trained model cards: if an
+        # old multiplicative calibration explodes at inference, use its saved
+        # additive MW correction rather than publishing a chart-destroying
+        # interval. The frontend independently withholds any remaining invalid
+        # band and keeps the central forecast visible.
+        typical = max(float(np.median(np.abs(out["p50"]))), 1.0)
+        calibrated_width = np.asarray(out["p90"] - out["p10"], dtype=float)
+        unstable = (not np.isfinite(calibrated_width).all()
+                    or float(np.median(calibrated_width)) > typical * 0.75)
+        if unstable:
+            out["p10"] = raw_p10 - self.conformal_q
+            out["p90"] = raw_p90 + self.conformal_q
         # enforce monotone quantiles
         out["p10"] = np.minimum(out["p10"], out["p50"])
         out["p90"] = np.maximum(out["p90"], out["p50"])

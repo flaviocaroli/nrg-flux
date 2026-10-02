@@ -1,5 +1,5 @@
 /* ============================================================
-   Europe Grid Pulse — design tokens
+   NRG-Flux Europe — design tokens
    Direction: daylight control room. Cool paper ground (not cream),
    white instrument cards, deep ink numerals — the vernacular of TSO
    dispatch documentation and grid cartography. Semantic signals:
@@ -53,19 +53,21 @@ body {
 
 /* ---------------- header + the 50 Hz pulse ---------------- */
 .masthead {
-  display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 28px 0 0;
 }
-.brand {
-  font-weight: 700; font-size: 14px; letter-spacing: .16em; color: var(--slate);
-}
-.brand b { color: var(--cobalt); }
+.brand-lockup { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-mark { width: 46px; height: 46px; flex: none; display: block; }
 .masthead h1 {
-  font-size: 27px; font-weight: 700; letter-spacing: -0.015em; color: var(--ink);
+  font-size: 29px; font-weight: 700; line-height: 1.02; letter-spacing: -0.02em; color: var(--ink);
+}
+.region-label {
+  display: inline-block; margin-left: 8px; color: var(--cobalt);
+  font-size: .62em; font-weight: 650; letter-spacing: .04em; vertical-align: .12em;
 }
 .masthead h1 small {
   display: block; font-size: 12px; font-weight: 500; letter-spacing: .02em;
-  color: var(--slate); margin-top: 2px;
+  color: var(--slate); margin-top: 5px; line-height: 1.3;
 }
 .masthead .meta {
   margin-left: auto; font-family: var(--font-mono); font-size: 12px;
@@ -354,8 +356,66 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
 .profile-table { width: 100%; border-collapse: collapse; margin-top: 8px; font: 11.5px var(--font-mono); }
 .profile-table th { text-align: left; color: var(--slate-dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 7px 8px; border-bottom: 1px solid var(--hairline); }
 .profile-table td { padding: 8px; border-bottom: 1px solid rgba(215,221,230,.65); font-variant-numeric: tabular-nums; }
+
+/* ---------------- contextual information ---------------- */
+.info-tip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; z-index: 5; }
+.info-tip-button { width: 16px; height: 16px; padding: 0; border: 1px solid var(--slate-dim); border-radius: 50%; background: var(--panel); color: var(--slate); cursor: help; font: 700 10px/14px Georgia, serif; text-align: center; }
+.info-tip-button:hover, .info-tip-button:focus-visible { border-color: var(--cobalt); color: var(--cobalt); outline: none; }
+.info-tip-popover { position: fixed; max-height: min(220px, calc(100vh - 24px)); overflow-y: auto; padding: 10px 11px; border: 1px solid var(--hairline); border-radius: 8px; background: #fff; color: var(--slate); box-shadow: 0 8px 28px rgba(14,27,44,.16); font: 11px/1.45 var(--font-mono); letter-spacing: 0; text-transform: none; white-space: normal; pointer-events: none; z-index: 1000; }
+.kpi .info-tip { margin-left: 3px; }
+.kpi .info-tip-button { transform: translateY(-1px); }
+.model-warning { margin: 8px 0 2px; padding: 7px 9px; border: 1px solid rgba(215,126,0,.32); border-radius: 7px; background: rgba(215,126,0,.07); color: #885100; font: 10px/1.45 var(--font-mono); }
+
+/* ---------------- Forecast Arena ---------------- */
+.arena-shell { margin-bottom: 14px; }
+.arena-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.arena-head p { margin-top: 5px; color: var(--slate); font-size: 13px; }
+.arena-verdict { flex: none; border: 1px solid; border-radius: 999px; padding: 5px 10px; font: 700 10px var(--font-mono); letter-spacing: .06em; }
+.arena-verdict.accepted { color: var(--ok); border-color: rgba(24,138,87,.38); background: rgba(24,138,87,.07); }
+.arena-verdict.withheld { color: var(--amber); border-color: rgba(215,126,0,.38); background: rgba(215,126,0,.07); }
+.arena-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin: 16px 0 13px; }
+.arena-kpis > div { background: var(--panel-raised); border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; }
+.arena-kpis span { display: block; color: var(--slate-dim); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+.arena-kpis b { display: block; margin-top: 4px; color: var(--ink); font-size: 17px; }
+.arena-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }
+.arena-controls button, .arena-actual { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--panel); color: var(--slate-dim); padding: 4px 9px; font: 10px var(--font-mono); }
+.arena-controls button { cursor: pointer; opacity: .62; }
+.arena-controls button.on { color: var(--ink); opacity: 1; background: var(--panel-raised); }
+.arena-controls i { width: 8px; height: 8px; border-radius: 50%; }
+.arena-actual { color: var(--ink); }
+.arena-chart { height: 390px; }
+.arena-window { margin: -3px 0 12px; color: var(--slate-dim); font: 10px var(--font-mono); text-align: right; }
+.arena-evidence { margin: 4px 0 15px; padding: 13px; border: 1px solid rgba(31,73,224,.22); border-radius: 10px; background: linear-gradient(135deg, rgba(31,73,224,.055), rgba(31,73,224,.015)); }
+.arena-evidence-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.arena-evidence-head strong { color: var(--ink); font-size: 13px; }
+.arena-evidence-head span { color: var(--cobalt); font: 700 9px var(--font-mono); letter-spacing: .06em; }
+.arena-evidence-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.arena-evidence-grid > div { min-width: 0; padding: 8px; border: 1px solid var(--hairline); border-radius: 7px; background: rgba(255,255,255,.78); }
+.arena-evidence-grid span { display: block; min-height: 25px; color: var(--slate-dim); font: 9px/1.35 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.arena-evidence-grid b { display: block; margin-top: 4px; color: var(--ink); font: 650 15px var(--font-mono); }
+.arena-evidence-conclusion { margin-top: 10px; color: var(--slate); font-size: 12px; line-height: 1.5; }
+.arena-evidence-conclusion strong { color: var(--ink); }
+.arena-evidence-conclusion small { display: block; margin-top: 4px; color: var(--amber); font: 9.5px/1.45 var(--font-mono); }
+.arena-table-wrap { overflow-x: auto; }
+.arena-table { width: 100%; border-collapse: collapse; font: 11px var(--font-mono); }
+.arena-table th { padding: 7px; color: var(--slate-dim); text-align: right; border-bottom: 1px solid var(--hairline); text-transform: uppercase; letter-spacing: .05em; }
+.arena-table th:first-child, .arena-table td:first-child, .arena-table th:nth-child(2), .arena-table td:nth-child(2) { text-align: left; }
+.arena-table td { padding: 8px 7px; text-align: right; border-bottom: 1px solid rgba(215,221,230,.65); white-space: nowrap; }
+.arena-table td small { color: var(--cobalt); margin-left: 5px; }
+.arena-status { border-radius: 4px; padding: 2px 6px; font-size: 9px; letter-spacing: .03em; }
+.arena-status.validated { color: var(--ok); background: rgba(24,138,87,.08); }
+.arena-status.preliminary { color: var(--amber); background: rgba(215,126,0,.09); }
+.arena-status.insufficient-data, .arena-status.failed { color: var(--alarm); background: rgba(204,61,78,.08); }
+.arena-ablation { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; align-items: center; }
+.arena-ablation strong { margin-right: 4px; color: var(--slate); font-size: 11px; }
+.arena-ablation span { display: flex; gap: 7px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 7px; color: var(--slate); font: 10px var(--font-mono); }
+.arena-ablation b { color: var(--ink); }
+.arena-notes { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 7px 18px; margin-top: 13px; padding-top: 10px; border-top: 1px solid var(--hairline); color: var(--slate-dim); font: 9.5px/1.5 var(--font-mono); }
+@media (max-width: 1050px) { .arena-evidence-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 850px) { .arena-kpis { grid-template-columns: repeat(2, 1fr); } .arena-head { display: block; } .arena-verdict { display: inline-block; margin-top: 9px; } }
 @media (max-width: 900px) { .profile-kpis { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 620px) { .profile-head, .profile-report-head { flex-direction: column; } .profile-controls input { max-width: 100%; } }
+@media (max-width: 620px) { .arena-evidence-grid { grid-template-columns: repeat(2, 1fr); } .brand-mark { width: 40px; height: 40px; } .masthead h1 { font-size: 25px; } }
 @media print { .no-print, .profile-controls, .profile-head > .pc-button, .ticker, .pulse-rule, .section-rule, .masthead, .kpis, .grid, .country-stack, .catalog, .foot { display: none !important; } body { background: #fff; } .shell { max-width: none; padding: 0; } .profile-cost { border: none; box-shadow: none; } }
 
 /* ---- Multi-market: all four countries at once ---- */
@@ -372,6 +432,44 @@ table.outages { width: 100%; border-collapse: collapse; font-family: var(--font-
 .country-head .cname { font-family: var(--font-mono); font-size: 12px; color: var(--slate); }
 .grid.grid-even { grid-template-columns: 1fr 1fr; }
 @media (max-width: 900px) { .grid.grid-even { grid-template-columns: 1fr; } }
+
+/* ---- Europe market explorer ---- */
+.market-overview { margin-bottom: 4px; padding: 15px 17px; }
+.market-overview-copy { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.market-overview-copy strong {
+  font-family: var(--font-display); font-size: 15px; color: var(--ink);
+}
+.market-overview-copy span {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--slate-dim);
+}
+.market-stats {
+  display: flex; gap: 9px; flex-wrap: wrap; margin: 12px 0;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--slate);
+}
+.market-stats span {
+  border: 1px solid var(--hairline); border-radius: 6px; padding: 5px 9px;
+  background: var(--panel-raised);
+}
+.market-stats b { color: var(--cobalt); font-size: 12px; }
+.market-overview .market-bar { margin-bottom: 8px; }
+.market-state, .market-key i {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none;
+}
+.market-state.model, .market-key i.model { background: var(--ok); }
+.market-state.data, .market-key i.data { background: var(--cobalt); }
+.market-state.partial, .market-key i.partial { background: var(--amber); }
+.market-key {
+  display: flex; gap: 15px; flex-wrap: wrap; font-family: var(--font-mono);
+  font-size: 9.5px; color: var(--slate-dim);
+}
+.market-key span { display: inline-flex; align-items: center; gap: 5px; }
+.eu-map g[role="button"]:focus { outline: none; }
+.eu-map g[role="button"]:focus path { filter: drop-shadow(0 0 3px rgba(31,73,224,.65)); }
+@media (max-width: 640px) {
+  .market-overview { padding: 12px; }
+  .market-chip { padding: 5px 9px; }
+  .country-head { flex-wrap: wrap; }
+}
 
 /* ---- Data catalog: market selector ---- */
 .catalog-country {
