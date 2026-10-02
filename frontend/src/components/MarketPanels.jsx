@@ -102,26 +102,36 @@ function CountryBlock({ market }) {
 
   useEffect(() => {
     let live = true
-    setBusy(true)
-    setData(null)
+    let first = true
     const zone = market.zones[0]?.eic
     const unavailable = () => Promise.reject(new Error('unavailable'))
-    Promise.allSettled([
-      market.has_load_forecast ? api.forecast(168, market.national_eic) : unavailable(),
-      market.has_price_forecast && zone ? api.priceForecast(48, zone) : unavailable(),
-      market.load_rows > 0 ? api.loadActual(market.national_eic) : unavailable(),
-      market.price_rows > 0 && zone ? api.pricesFor(zone) : unavailable(),
-    ]).then(([lf, pf, la, pr]) => {
-      if (!live) return
-      setData({
-        loadFc: lf.status === 'fulfilled' ? lf.value : null,
-        priceFc: pf.status === 'fulfilled' ? pf.value : null,
-        loadAct: la.status === 'fulfilled' ? la.value.series : [],
-        priceAct: pr.status === 'fulfilled' ? pr.value.series : [],
+
+    const refresh = () => {
+      if (first) {
+        setBusy(true)
+        setData(null)
+      }
+      Promise.allSettled([
+        market.has_load_forecast ? api.forecast(168, market.national_eic) : unavailable(),
+        market.has_price_forecast && zone ? api.priceForecast(48, zone) : unavailable(),
+        market.load_rows > 0 ? api.loadActual(market.national_eic) : unavailable(),
+        market.price_rows > 0 && zone ? api.pricesFor(zone) : unavailable(),
+      ]).then(([lf, pf, la, pr]) => {
+        if (!live) return
+        setData({
+          loadFc: lf.status === 'fulfilled' ? lf.value : null,
+          priceFc: pf.status === 'fulfilled' ? pf.value : null,
+          loadAct: la.status === 'fulfilled' ? la.value.series : [],
+          priceAct: pr.status === 'fulfilled' ? pr.value.series : [],
+        })
+        setBusy(false)
+        first = false
       })
-      setBusy(false)
-    })
-    return () => { live = false }
+    }
+
+    refresh()
+    const id = setInterval(refresh, 120000)
+    return () => { live = false; clearInterval(id) }
   }, [market])
 
   const lo = useMemo(() => (data ? loadChart(data.loadFc, data.loadAct) : null), [data])

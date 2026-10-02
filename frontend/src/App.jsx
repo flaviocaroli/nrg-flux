@@ -47,15 +47,24 @@ export default function App() {
 
   const kpis = useMemo(() => {
     if (!dash) return null
-    const lastByZone = Object.entries(dash.prices).map(([z, s]) => [z, s.at(-1)?.[1] ?? 0])
-    const pun = lastByZone.reduce((a, [, v]) => a + v, 0) / lastByZone.length
-    const hi = lastByZone.reduce((a, b) => (b[1] > a[1] ? b : a))
-    const lo = lastByZone.reduce((a, b) => (b[1] < a[1] ? b : a))
+    const lastByZone = Object.entries(dash.prices)
+      .map(([z, series]) => [z, series.at(-1)?.[1]])
+      .filter(([, value]) => Number.isFinite(value))
+    const pun = lastByZone.length
+      ? lastByZone.reduce((a, [, v]) => a + v, 0) / lastByZone.length
+      : 0
+    const countryPrices = Object.entries(dash.markets || {})
+      .filter(([, market]) => Number.isFinite(market.price))
+    const marketCount = (lastByZone.length ? 1 : 0) + countryPrices.length
+    const marketLabels = [
+      ...(lastByZone.length ? ['IT'] : []),
+      ...countryPrices.map(([cc]) => cc),
+    ].join(' · ')
     const next24 = fc?.forecast?.slice(0, 24) || []
     const peak = next24.length ? next24.reduce((a, b) => (b.mw_p50 > a.mw_p50 ? b : a), next24[0]) : null
     const outMw = dash.outages.reduce((a, o) => a + o.mw, 0)
     const loadNow = dash.load.at(-1)?.[1] ?? 0
-    return { pun, spread: hi[1] - lo[1], hiZone: hi[0], loZone: lo[0], peak, outMw, nOut: dash.outages.length, loadNow }
+    return { pun, marketCount, marketLabels, peak, outMw, nOut: dash.outages.length, loadNow }
   }, [dash, fc])
 
   const priceOption = useMemo(() => {
@@ -147,10 +156,12 @@ export default function App() {
   )
   if (!dash || !kpis) return <div className="loading">syncing with the European grid …</div>
 
-  const tickerItems = Object.entries(dash.prices).map(([z, s]) => {
-    const last = s.at(-1)?.[1], prev = s.at(-25)?.[1] ?? last
-    return { z, v: last, d: last - prev }
-  })
+  const tickerItems = [
+    { z: 'IT', v: kpis.pun, currency: 'EUR' },
+    ...Object.entries(dash.markets || {})
+      .filter(([, market]) => Number.isFinite(market.price))
+      .map(([cc, market]) => ({ z: cc, v: market.price, currency: market.currency })),
+  ].filter((item) => Number.isFinite(item.v))
   return (
     <div className="shell">
       <header className="masthead">
@@ -185,8 +196,7 @@ export default function App() {
             <span className="tick" key={i}>
               <span className="z">{t.z}</span>
               <span className="v">{t.v?.toFixed(2)}</span>
-              <span className="u">€/MWh</span>
-              <span className={t.d >= 0 ? 'up' : 'down'}>{t.d >= 0 ? '▲' : '▼'}{Math.abs(t.d).toFixed(1)}</span>
+              <span className="u">{t.currency === 'EUR' ? '€/MWh' : `${t.currency}/MWh`}</span>
             </span>
           ))}
         </div>
@@ -204,9 +214,9 @@ export default function App() {
           <div className="sub">{kpis.peak ? `${fmtHour(kpis.peak.ts_utc)} CET · band ${(kpis.peak.mw_p10 / 1000).toFixed(1)}–${(kpis.peak.mw_p90 / 1000).toFixed(1)} GW` : 'forecast temporarily unavailable'}</div>
         </div>
         <div className="kpi">
-          <div className="label">Italy max zonal spread <InfoTip label="About zonal spread">The difference between the highest and lowest latest Italian zonal day-ahead prices. It highlights market separation, not a consumer tariff.</InfoTip></div>
-          <div className="value">{kpis.spread.toFixed(2)}<small>€/MWh</small></div>
-          <div className="sub">{kpis.hiZone} over {kpis.loZone}</div>
+          <div className="label">Markets with current price data <InfoTip label="About market coverage">Count of country reference markets in the dashboard that currently have a usable latest day-ahead price. Italy is represented by the six-zone benchmark; other countries use their configured reference bidding zone.</InfoTip></div>
+          <div className="value">{kpis.marketCount}<small>/ 11</small></div>
+          <div className="sub">{kpis.marketLabels || 'waiting for market data'}</div>
         </div>
         <div className="kpi alarm">
           <div className="label">Tracked active generation outages <InfoTip label="About tracked outages">Validated currently active generation-unavailability records. This is a monitored subset, not total unavailable Italian capacity.</InfoTip></div>

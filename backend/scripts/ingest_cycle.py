@@ -1,4 +1,4 @@
-"""One incremental ingestion cycle — designed to run every 30 minutes.
+"""One incremental ingestion cycle — designed to run every hour.
 
     python3 scripts/ingest_cycle.py            # normal cycle
     python3 scripts/ingest_cycle.py --days 7   # deeper top-up after downtime
@@ -9,12 +9,14 @@ What it does, in order:
      small --days window is cheap and safe to repeat).
   3. Top up ERA5 weather — but only when the newest weather row is older than
      WEATHER_TOPUP_HOURS, because weather history publishes daily, not
-     half-hourly, and there is no point hammering Open-Meteo 48x a day.
+     hourly, and there is no point hammering Open-Meteo 24x a day.
   4. Optionally refresh the fuel curve (evaluation only until a licensed feed
      exists) when NRGFLUX_FUEL_PROVIDER is set.
   5. Run the data-quality checks that previously existed but never ran
      (handover Tier-3 #11), so gaps/staleness/outliers land in
      /v1/quality/events on every cycle.
+  6. Reissue existing load and price forecasts from the newly ingested data.
+     This does NOT retrain models; fitting remains the daily job.
 
 Environment knobs (all optional):
   NRGFLUX_MARKETS        comma list, default "IT,FR,DE,CH"
@@ -116,6 +118,8 @@ def main() -> int:
     ap.add_argument("--days", type=int,
                     default=int(os.environ.get("NRGFLUX_INGEST_DAYS", "3")),
                     help="ENTSO-E incremental window (default 3)")
+    ap.add_argument("--skip-forecast-refresh", action="store_true",
+                    help="ingest/quality only; do not reissue forecasts")
     args = ap.parse_args()
 
     markets = [m.strip().upper() for m in
@@ -154,6 +158,13 @@ def main() -> int:
         run_step("fuel", cmd)  # non-fatal
 
     run_quality_checks(markets)
+
+    if ok and not args.skip_forecast_refresh:
+        ok &= run_step("forecast refresh", ["scripts/refresh_forecasts.py"])
+    elif not ok:
+        log("forecast refresh skipped because market-data ingestion had failures")
+    else:
+        log("forecast refresh skipped by command-line flag")
 
     log(f"ingest cycle done: {'OK' if ok else 'WITH FAILURES'}")
     return 0 if ok else 1
